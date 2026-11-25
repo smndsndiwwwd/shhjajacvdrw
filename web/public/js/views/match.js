@@ -1,4 +1,4 @@
-import { api, esc, toast } from '../api.js';
+import { api, esc, formatRichText, toast } from '../api.js';
 import { renderFieldRadarSVG } from '../components/radar.js';
 import { renderHawkEyePitchSVG } from '../components/gearSvg.js';
 
@@ -45,10 +45,9 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       <div style="padding:10px 12px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.35);margin-top:10px;font-size:0.82rem;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <strong style="color:var(--emerald);">🏏 Equipped Shot: ${esc(shot.num)} ${esc(shot.name)}</strong>
-          <span class="badge badge-cyan">${esc(shot.style)} • Risk: ${esc(shot.risk)}</span>
+          <span class="badge badge-cyan">${esc(shot.style)}</span>
         </div>
         <div style="color:var(--text-muted);margin-top:4px;">${esc(shot.desc)}</div>
-        <div class="mono" style="font-size:0.74rem;color:var(--gold);margin-top:4px;">Timing Mod: ${shot.timingMod >= 0 ? '+' : ''}${shot.timingMod} | Power Mod: ${shot.powerMod >= 0 ? '+' : ''}${shot.powerMod}</div>
       </div>
     `;
   };
@@ -62,10 +61,15 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
 
   const startNeedle = () => {
     stopNeedle();
-    const tick = () => {
+    const tp = match?.timingProfile || { needleSpeed: 0.78 };
+    const baseSpeed = tp.needleSpeed || 0.78;
+    let lastTs = null;
+    const tick = (ts) => {
       const el = document.getElementById('timing-needle');
       if (!el) return;
-      needlePos += needleDir * 1.45;
+      const dtScale = lastTs ? Math.min(2.2, Math.max(0.35, (ts - lastTs) / 16.67)) : 1;
+      lastTs = ts;
+      needlePos += needleDir * baseSpeed * dtScale;
       if (needlePos >= 98) { needlePos = 98; needleDir = -1; }
       if (needlePos <= 2) { needlePos = 2; needleDir = 1; }
       el.style.left = `${needlePos}%`;
@@ -76,9 +80,10 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
 
   const evaluateNeedle = () => {
     if (timingMode === 'auto') return null;
+    const tp = match?.timingProfile || { sweetHalf: 17, goodHalf: 38 };
     const dist = Math.abs(needlePos - 50);
-    if (dist <= 9) return 'Perfect';
-    if (dist <= 26) return needlePos < 50 ? 'Slightly Early' : 'Slightly Late';
+    if (dist <= tp.sweetHalf) return 'Perfect';
+    if (dist <= tp.goodHalf) return needlePos < 50 ? 'Slightly Early' : 'Slightly Late';
     return needlePos < 50 ? 'Very Early' : 'Very Late';
   };
 
@@ -134,7 +139,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
               <span class="badge badge-cyan">${esc(lb.timing)}</span>
               <span class="badge badge-muted">${esc(lb.shotName)}</span>
             </div>
-            <div style="font-size:0.82rem;color:var(--text-muted);margin-top:3px;">${esc(lb.commentary)}</div>
+            <div style="font-size:0.84rem;color:var(--text-secondary);margin-top:4px;line-height:1.45;">${formatRichText(lb.commentary)}</div>
           </div>
         </div>
       </div>
@@ -349,9 +354,20 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
             </div>
 
             <div class="card">
-              <h4 style="margin-bottom:10px;">🎙️ Live Commentary</h4>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h4>🎙️ Live Commentary</h4>
+                <span class="badge badge-muted">Ball-by-Ball</span>
+              </div>
               <div class="commentary-feed">
-                ${(match.commentaryLog || []).map(l => `<div class="comm-item">${esc(l)}</div>`).join('')}
+                ${(match.commentaryLog || []).map(l => {
+                  const lower = String(l).toLowerCase();
+                  const cls = (lower.includes('wicket') || lower.includes('out!') || lower.includes('bowled') || lower.includes('caught') || lower.includes('lbw'))
+                    ? 'comm-wicket'
+                    : (lower.includes('four') || lower.includes('six') || lower.includes('boundary') || lower.includes('maximum'))
+                      ? 'comm-boundary'
+                      : '';
+                  return `<div class="comm-item ${cls}">${formatRichText(l)}</div>`;
+                }).join('')}
               </div>
             </div>
           </div>
@@ -364,9 +380,16 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
 
   const renderBattingControls = () => {
     const isLeave = selFootwork === 'Leave' || selIntent === 'Leave';
+    const tp = match.timingProfile || { sweetHalf: 17, goodHalf: 38, eqTimingBonus: 0, playerEdge: 30, bowlerThreat: 25 };
+    const redL = Math.max(2, Math.round(50 - tp.goodHalf));
+    const greenL = Math.max(redL + 4, Math.round(50 - tp.sweetHalf));
+    const greenR = Math.min(96, Math.round(50 + tp.sweetHalf));
+    const redR = Math.min(98, Math.round(50 + tp.goodHalf));
+    const barBg = `linear-gradient(90deg, #ef4444 0%, #f59e0b ${redL}%, #10b981 ${greenL}%, #34d399 50%, #10b981 ${greenR}%, #f59e0b ${redR}%, #ef4444 100%)`;
+
     return `
-      <div style="padding:12px 14px;border-radius:12px;background:linear-gradient(90deg, rgba(56,189,248,0.14), rgba(16,185,129,0.08));border:1px solid rgba(56,189,248,0.35);margin-bottom:14px;font-size:0.88rem;line-height:1.45;">
-        ${esc(match.releaseHint || 'Bowler runs in...')}
+      <div class="release-banner">
+        ${formatRichText(match.releaseHint || 'Bowler runs in...')}
       </div>
 
       <!-- Clickable Tactical Breadcrumb Stepper -->
@@ -393,9 +416,9 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
         <h3 style="margin-bottom:10px;">🧍 Step 1: Take Your Guard &amp; Stance</h3>
         <div class="choice-grid-3">
           ${[
-            { id: 'Off Side', ico: '➡️', sub: 'Guard outside off • Strong vs outswing & covers' },
-            { id: 'In Line', ico: '⚖️', sub: 'Middle stump guard • Balanced to both sides' },
-            { id: 'Leg Side', ico: '⬅️', sub: 'Clear front pad • Whip pads & leg-side balls' }
+            { id: 'Off Side', ico: '➡️', sub: 'Guard set outside off stump' },
+            { id: 'In Line', ico: '⚖️', sub: 'Balanced middle-stump guard' },
+            { id: 'Leg Side', ico: '⬅️', sub: 'Open stance clearing the front pad' }
           ].map(st => `
             <button class="choice-card bat-stance-btn" data-val="${st.id}">
               <span class="cc-title">${st.ico} ${st.id}</span>
@@ -409,10 +432,10 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
         <h3 style="margin-bottom:10px;">👣 Step 2: Commit Your Footwork</h3>
         <div class="choice-grid-2">
           ${[
-            { id: 'Front Foot', ico: '🦶', sub: 'Best vs Full & Good Length deliveries' },
-            { id: 'Back Foot', ico: '🔙', sub: 'Best vs Short pitch • Pull, Hook & Cut' },
-            { id: 'Advanced', ico: '⚡', sub: 'Step down the pitch to smother spin & yorkers' },
-            { id: 'Leave', ico: '🛡️', sub: 'Watch wide or bouncing balls cleanly pass' }
+            { id: 'Front Foot', ico: '🦶', sub: 'Stride forward into the pitch of the ball' },
+            { id: 'Back Foot', ico: '🔙', sub: 'Transfer weight back inside the crease' },
+            { id: 'Advanced', ico: '⚡', sub: 'Use your feet and dance down the track' },
+            { id: 'Leave', ico: '🛡️', sub: 'Shoulder arms and hold your bat high' }
           ].map(fw => `
             <button class="choice-card bat-fw-btn" data-val="${fw.id}">
               <span class="cc-title">${fw.ico} ${fw.id === 'Leave' ? 'Leave Ball' : fw.id}</span>
@@ -424,23 +447,23 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       ` : ''}
 
       ${batStep === 'intent' ? `
-        <h3 style="margin-bottom:10px;">🎯 Step 3: Choose Shot Aggression</h3>
+        <h3 style="margin-bottom:10px;">🎯 Step 3: Choose Shot Intent</h3>
         <div class="choice-grid-2">
           <button class="choice-card bat-intent-btn" data-val="Push">
-            <span class="cc-title">🛡️ Push <span class="badge badge-emerald">Low Risk</span></span>
-            <span class="cc-sub">Soft hands defense &amp; safe singles into gaps (0–2 runs).</span>
+            <span class="cc-title">🛡️ Push</span>
+            <span class="cc-sub">Controlled touch with soft hands.</span>
           </button>
           <button class="choice-card bat-intent-btn" data-val="Stroke">
-            <span class="cc-title">🏏 Stroke <span class="badge badge-cyan">Balanced</span></span>
-            <span class="cc-sub">Classic timed drives &amp; cuts along the ground (1–4 runs).</span>
+            <span class="cc-title">🏏 Stroke</span>
+            <span class="cc-sub">Full-faced bat swing through the line.</span>
           </button>
           <button class="choice-card bat-intent-btn" data-val="Loft">
-            <span class="cc-title">🚀 Loft <span class="badge badge-gold">High Reward</span></span>
-            <span class="cc-sub">Aerial power clearing the inner ring &amp; boundary ropes (4–6 runs).</span>
+            <span class="cc-title">🚀 Loft</span>
+            <span class="cc-sub">Aerial swing elevating the ball upward.</span>
           </button>
           <button class="choice-card bat-intent-btn" data-val="Leave">
-            <span class="cc-title">🧘 Leave <span class="badge badge-muted">Safe</span></span>
-            <span class="cc-sub">Abort swing and let the delivery pass through to the keeper.</span>
+            <span class="cc-title">🧘 Leave</span>
+            <span class="cc-sub">Tuck the bat in and watch it pass.</span>
           </button>
         </div>
         <button class="btn btn-sm bat-back-fw" style="margin-top:12px;">⬅️ Back to Footwork</button>
@@ -472,14 +495,19 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
             <span class="label" style="margin:0;">⏱️ Timing Release Meter (${timingMode === 'meter' ? 'Interactive Skill' : 'Auto RPG Roll'})</span>
             <button class="btn btn-sm" id="btn-toggle-timing">${timingMode === 'meter' ? 'Switch to Auto-Roll' : 'Switch to Skill Meter'}</button>
           </div>
+          <div class="timing-meta">
+            <span style="color:var(--emerald);border-color:rgba(16,185,129,0.4);">Sweet Spot: ±${tp.sweetHalf}%</span>
+            <span>Gear Bonus: ${tp.eqTimingBonus >= 0 ? '+' : ''}${tp.eqTimingBonus}</span>
+            <span>Your Edge: ${tp.playerEdge} vs Bowler ${tp.bowlerThreat}</span>
+          </div>
           ${timingMode === 'meter' ? `
-            <div class="timing-bar">
+            <div class="timing-bar" style="background:${barBg};">
               <div class="timing-needle" id="timing-needle"></div>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-top:5px;">
-              <span>Very Early</span><span>Slightly Early</span><span style="color:var(--emerald);font-weight:700;">SWEET SPOT</span><span>Slightly Late</span><span>Very Late</span>
+              <span>Very Early</span><span>Early</span><span style="color:var(--emerald);font-weight:700;">SWEET SPOT</span><span>Late</span><span>Very Late</span>
             </div>
-          ` : `<div style="font-size:0.84rem;color:var(--text-muted);">Auto-roll uses your Timing, Confidence &amp; Skills automatically.</div>`}
+          ` : `<div style="font-size:0.84rem;color:var(--text-muted);">Auto-roll weighs your Gear Timing (+${tp.eqTimingBonus}), Confidence &amp; Skills directly against the Bowler (${tp.bowlerThreat}).</div>`}
         </div>
 
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
@@ -517,20 +545,20 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       ${bowlStep === 'line' ? `
         <h3 style="margin-bottom:10px;">📐 Step 1: Select Delivery Line</h3>
         <div class="choice-grid-2">
-          <button class="choice-card bowl-line-btn" data-val="Stumps"><span class="cc-title">🎯 Stumps</span><span class="cc-sub">Attack middle &amp; off — LBW and bowled threat</span></button>
-          <button class="choice-card bowl-line-btn" data-val="Off Side"><span class="cc-title">➡️ Off Side</span><span class="cc-sub">Corridor of uncertainty outside off stump</span></button>
-          <button class="choice-card bowl-line-btn" data-val="Leg Side"><span class="cc-title">⬅️ Leg Side</span><span class="cc-sub">Cramp the batter or attack the pads</span></button>
-          <button class="choice-card bowl-line-btn" data-val="Wide"><span class="cc-title">🚫 Wide Outside Off</span><span class="cc-sub">Wide yorker / wide slot away from arc</span></button>
+          <button class="choice-card bowl-line-btn" data-val="Stumps"><span class="cc-title">🎯 Stumps</span><span class="cc-sub">Straight line toward middle &amp; off</span></button>
+          <button class="choice-card bowl-line-btn" data-val="Off Side"><span class="cc-title">➡️ Off Side</span><span class="cc-sub">Outside the off-stump channel</span></button>
+          <button class="choice-card bowl-line-btn" data-val="Leg Side"><span class="cc-title">⬅️ Leg Side</span><span class="cc-sub">On the batter&apos;s leg-side hip &amp; pads</span></button>
+          <button class="choice-card bowl-line-btn" data-val="Wide"><span class="cc-title">🚫 Wide Outside Off</span><span class="cc-sub">Wide outside the off-stump tramline</span></button>
         </div>
       ` : ''}
 
       ${bowlStep === 'length' ? `
         <h3 style="margin-bottom:10px;">📏 Step 2: Select Pitch Length</h3>
         <div class="choice-grid-2">
-          <button class="choice-card bowl-len-btn" data-val="Yorker"><span class="cc-title">🎯 Yorker</span><span class="cc-sub">Base of stumps — high reward, miss-risk on full toss</span></button>
-          <button class="choice-card bowl-len-btn" data-val="Full"><span class="cc-title">🏏 Full Length</span><span class="cc-sub">Invites the drive with swing/turn opportunity</span></button>
-          <button class="choice-card bowl-len-btn" data-val="Good Length"><span class="cc-title">⚖️ Good Length</span><span class="cc-sub">Classic testing area causing indecision</span></button>
-          <button class="choice-card bowl-len-btn" data-val="Short"><span class="cc-title">🚀 Short Pitch</span><span class="cc-sub">Sharp bounce testing hook &amp; pull timing</span></button>
+          <button class="choice-card bowl-len-btn" data-val="Yorker"><span class="cc-title">🎯 Yorker</span><span class="cc-sub">Right at the popping crease</span></button>
+          <button class="choice-card bowl-len-btn" data-val="Full"><span class="cc-title">🏏 Full Length</span><span class="cc-sub">Pitched up well forward</span></button>
+          <button class="choice-card bowl-len-btn" data-val="Good Length"><span class="cc-title">⚖️ Good Length</span><span class="cc-sub">Three-quarter pitch zone</span></button>
+          <button class="choice-card bowl-len-btn" data-val="Short"><span class="cc-title">🚀 Short Pitch</span><span class="cc-sub">Dug in halfway down the track</span></button>
         </div>
         <button class="btn btn-sm bowl-back-line" style="margin-top:12px;">⬅️ Back to Line</button>
       ` : ''}
@@ -538,10 +566,10 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       ${bowlStep === 'variation' ? `
         <h3 style="margin-bottom:10px;">🌀 Step 3: Select Bowling Craft</h3>
         <div class="choice-grid-2">
-          <button class="choice-card bowl-var-btn" data-val="Normal Delivery"><span class="cc-title">⚖️ ${isSpin ? 'Stock Turn' : 'Stock Seam'}</span><span class="cc-sub">Reliable control &amp; high accuracy</span></button>
-          <button class="choice-card bowl-var-btn" data-val="Swing/Spin"><span class="cc-title">🌀 ${isSpin ? 'Drift / Arm Ball' : 'Swing Ball'}</span><span class="cc-sub">Late lateral air movement</span></button>
-          <button class="choice-card bowl-var-btn" data-val="Cutter/Googly"><span class="cc-title">🔄 ${isSpin ? 'Doosra / Googly' : 'Off/Leg Cutter'}</span><span class="cc-sub">Deceptive turn off the pitch</span></button>
-          <button class="choice-card bowl-var-btn" data-val="Slower Ball"><span class="cc-title">🐢 ${isSpin ? 'Flighted Loop' : 'Slower Ball'}</span><span class="cc-sub">Deceives aggressive lofting shots</span></button>
+          <button class="choice-card bowl-var-btn" data-val="Normal Delivery"><span class="cc-title">⚖️ ${isSpin ? 'Stock Turn' : 'Stock Seam'}</span><span class="cc-sub">Standard natural release</span></button>
+          <button class="choice-card bowl-var-btn" data-val="Swing/Spin"><span class="cc-title">🌀 ${isSpin ? 'Drift / Arm Ball' : 'Swing Ball'}</span><span class="cc-sub">Airborne lateral drift</span></button>
+          <button class="choice-card bowl-var-btn" data-val="Cutter/Googly"><span class="cc-title">🔄 ${isSpin ? 'Doosra / Googly' : 'Off/Leg Cutter'}</span><span class="cc-sub">Sharp break off the surface</span></button>
+          <button class="choice-card bowl-var-btn" data-val="Slower Ball"><span class="cc-title">🐢 ${isSpin ? 'Flighted Loop' : 'Slower Ball'}</span><span class="cc-sub">Pace variation through the air</span></button>
         </div>
         <button class="btn btn-sm bowl-back-len" style="margin-top:12px;">⬅️ Back to Length</button>
       ` : ''}
@@ -628,12 +656,20 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     const deliverBatBtn = document.getElementById('btn-bat-deliver');
     if (deliverBatBtn) deliverBatBtn.onclick = async () => {
       const timingQuality = evaluateNeedle();
+      const capturedNeedle = timingMode === 'meter' ? Math.round(needlePos * 10) / 10 : null;
       stopNeedle();
       deliverBatBtn.disabled = true;
       try {
         const res = await api('/api/match/ball', {
           method: 'POST',
-          body: { stance: selStance, footwork: selFootwork, intent: selIntent, zone: selZone || 'Cover', timingQuality }
+          body: {
+            stance: selStance,
+            footwork: selFootwork,
+            intent: selIntent,
+            zone: selZone || 'Cover',
+            timingQuality,
+            needlePos: capturedNeedle
+          }
         });
         match = res.match;
         resetBatSelection();

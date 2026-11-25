@@ -49,18 +49,82 @@ function getPlayerHandShort(name = '') {
   return leftHints.some(h => name.includes(h)) ? 'Left-hand bat' : 'Right-hand bat';
 }
 
-function resolveBattingTiming(timingChoice, playerAttrs, activeSkills, confidence, isClutch) {
+export function computeTimingProfile(match, playerOpt = null) {
+  const player = playerOpt || db.prepare('SELECT confidence, form FROM players WHERE discord_id = ?').get(match.playerId) || { confidence: 50, form: 50 };
+  const attrs = match.playerAttrs || {};
+  const eq = match.eqBonuses || {};
+  const skills = match.activeSkills || [];
+  const deliv = match.nextDelivery || {};
+
+  const eqTimingBonus = (eq.timing || 0) + Math.round((eq.technique || 0) * 0.45);
+  const confidence = Number(player.confidence ?? 50);
+  const form = Number(player.form ?? 50);
+  const isClutch = (match.bat?.ballsLimit || 18) - (match.bat?.balls || 0) <= 5;
+  const isSpin = deliv.speed === 'Slow' || Boolean(match.isSpinOpponent);
+
+  let skillBonus = 0;
+  if (isClutch && skills.includes('clutch_finisher')) skillBonus += 8;
+  if (isSpin && skills.includes('spin_specialist')) skillBonus += 6;
+  if (!isSpin && skills.includes('pace_destroyer')) skillBonus += 5;
+
+  const playerEdge = Math.round(
+    (attrs.timing || 15) * 0.55 +
+    (attrs.technique || 15) * 0.25 +
+    eqTimingBonus * 1.15 +
+    (confidence - 50) * 0.14 +
+    (form - 50) * 0.10 +
+    skillBonus
+  );
+
+  const bowlerSkill = match.bowlerSkill || 45;
+  const speedThreat = deliv.speed === 'Fast' ? 12 : deliv.speed === 'Slow' ? 5 : 7;
+  const varName = String(deliv.variation || '');
+  const varThreat = ['Googly', 'Doosra', 'Knuckle', 'Flipper', 'Reverse', 'Slower'].some(v => varName.includes(v))
+    ? 8
+    : ['Swing', 'Seam', 'Cutter', 'Drift', 'Inswinger', 'Outswinger'].some(v => varName.includes(v))
+      ? 4
+      : 0;
+  const pitchThreat = (match.pitch === 'Green Seamer' || match.pitch === 'Dusty Turn') ? 3 : 0;
+
+  const bowlerThreat = Math.round(bowlerSkill * 0.42 + speedThreat + varThreat + pitchThreat);
+  const netDiff = playerEdge - bowlerThreat;
+
+  const sweetHalf = Math.round(Math.min(24, Math.max(12.5, 17 + netDiff * 0.14)) * 10) / 10;
+  const goodHalf = Math.round(Math.min(44, Math.max(34, sweetHalf + 21)) * 10) / 10;
+  const needleSpeed = Math.round(Math.min(1.08, Math.max(0.55, 0.80 - netDiff * 0.0042)) * 100) / 100;
+
+  return {
+    sweetHalf,
+    goodHalf,
+    needleSpeed,
+    eqTimingBonus,
+    playerEdge,
+    bowlerThreat,
+    bowlerSkill,
+    deliverySpeed: deliv.speed || 'Medium',
+    deliveryVariation: deliv.variation || 'Normal'
+  };
+}
+
+function resolveBattingTiming(timingChoice, needlePos, timingProfile, confidence, activeSkills, isClutch) {
+  if (typeof needlePos === 'number' && !Number.isNaN(needlePos)) {
+    const dist = Math.abs(needlePos - 50);
+    if (dist <= timingProfile.sweetHalf) return 'Perfect';
+    if (dist <= timingProfile.goodHalf) return needlePos < 50 ? 'Slightly Early' : 'Slightly Late';
+    return needlePos < 50 ? 'Very Early' : 'Very Late';
+  }
+
   const validChoices = ['Perfect', 'Slightly Early', 'Slightly Late', 'Very Early', 'Very Late'];
   if (timingChoice && validChoices.includes(timingChoice)) {
     return timingChoice;
   }
 
-  // Automatic timing roll weighted by player timing, mentality & confidence
-  const timingAttr = playerAttrs.timing || 15;
-  const confFactor = (confidence - 50) * 0.25;
-  const clutchBonus = (isClutch && activeSkills.includes('clutch_finisher')) ? 15 : 0;
-  const perfectChance = Math.min(0.68, Math.max(0.18, 0.22 + (timingAttr * 0.0055) + ((confFactor + clutchBonus) / 150)));
-  const slightChance = Math.min(0.92, perfectChance + 0.42);
+  // Automatic timing roll weighted by equipment-vs-bowler profile, confidence & skills
+  const netEdge = (timingProfile?.playerEdge || 25) - (timingProfile?.bowlerThreat || 25);
+  const confFactor = ((confidence ?? 50) - 50) * 0.002;
+  const clutchBonus = (isClutch && activeSkills.includes('clutch_finisher')) ? 0.10 : 0;
+  const perfectChance = Math.min(0.80, Math.max(0.30, 0.44 + (netEdge * 0.0055) + confFactor + clutchBonus));
+  const slightChance = Math.min(0.96, perfectChance + 0.40);
 
   const roll = Math.random();
   if (roll < perfectChance) return 'Perfect';
@@ -162,6 +226,7 @@ function serializeMatchState(match) {
     bowler: curBowler,
     bowlersCard: match.attack ? match.attack.bowlers : [],
     releaseHint: match.releaseHint,
+    timingProfile: match.phase === 'batting' ? computeTimingProfile(match) : null,
     fieldPreset: match.phase === 'batting' ? (match.nextDelivery?.fieldPreset || 'Balanced') : (match.lastFieldPreset || 'Balanced'),
     isPowerplay,
     lastBall: match.lastBall,
@@ -520,7 +585,7 @@ export function playWebMatchBall(playerId, action = {}) {
   if (!player) throw new Error('Player profile missing.');
 
   if (match.phase === 'batting') {
-    const { stance = 'In Line', footwork = 'Front Foot', intent = 'Stroke', zone = 'Cover', timingQuality = null } = action;
+    const { stance = 'In Line', footwork = 'Front Foot', intent = 'Stroke', zone = 'Cover', timingQuality = null, needlePos = null } = action;
     const isLeave = footwork === 'Leave' || intent === 'Leave';
     const equippedShot = !isLeave
       ? getPlayerEquippedShot(playerId, footwork, intent, zone)
@@ -531,9 +596,11 @@ export function playWebMatchBall(playerId, action = {}) {
     const ppOvers = match.totalOvers >= 15 ? 6 : match.totalOvers >= 5 ? 2 : 1;
     const completedOvers = match.attack ? match.attack.completedOvers : Math.floor(match.bat.balls / 6);
     const isPowerplay = completedOvers < ppOvers;
+    const timingProfile = computeTimingProfile(match, player);
+    const parsedNeedle = (needlePos !== null && needlePos !== undefined && needlePos !== '') ? Number(needlePos) : null;
     const timingResult = isLeave
       ? 'Perfect'
-      : resolveBattingTiming(timingQuality, match.playerAttrs, match.activeSkills, player.confidence, isClutch);
+      : resolveBattingTiming(timingQuality, parsedNeedle, timingProfile, player.confidence, match.activeSkills, isClutch);
 
     const simResult = simulateBallAdvanced({
       bowlerInput: {

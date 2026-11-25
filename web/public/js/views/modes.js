@@ -1,4 +1,4 @@
-import { api, esc, toast, openModal, closeModal } from '../api.js';
+import { api, esc, formatRichText, toast, openModal, closeModal } from '../api.js';
 import { renderFieldRadarSVG } from '../components/radar.js';
 
 // ==========================================
@@ -433,7 +433,7 @@ export async function renderChallengeView(container, state, refresh) {
           </div>
         </div>
         <div class="commentary-feed" style="margin-top:12px;">
-          ${(st.log || []).map(l => `<div class="comm-item">${esc(l)}</div>`).join('')}
+          ${(st.log || []).map(l => `<div class="comm-item">${formatRichText(l)}</div>`).join('')}
         </div>
       </div>
     `;

@@ -39,6 +39,14 @@ export function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
+export function formatRichText(str) {
+  return esc(str)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em class="comm-em">$1</em>')
+    .replace(/`([^`\n]+)`/g, '<code class="comm-code">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
 export function openModal(html) {
   const root = document.getElementById('modal-root');
   root.innerHTML = `<div class="modal-overlay" id="modal-bg"><div class="modal-card">${html}</div></div>`;
