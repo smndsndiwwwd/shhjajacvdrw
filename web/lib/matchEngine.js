@@ -186,12 +186,35 @@ export function clearActiveWebMatch(playerId) {
   activeMatches.delete(playerId);
 }
 
+function buildInitialReleaseCue(d) {
+  if (!d) return '👀 *Bowler walks back to the mark...*';
+  const spd = d.speed === 'Fast'
+    ? 'steams in rapidly from the boundary'
+    : d.speed === 'Slow'
+      ? 'trots in with a slow, loopy rhythm'
+      : 'glides in with a measured run-up';
+  const v = String(d.variation || '').toLowerCase();
+  let gripHint = '';
+  if (v.includes('googly') || v.includes('doosra') || v.includes('mystery')) gripHint = ' — wrist snaps subtly behind the hand';
+  else if (v.includes('swing') || v.includes('seam')) gripHint = ' — shiny side polished, upright seam visible';
+  else if (v.includes('cutter') || v.includes('slower') || v.includes('knuckle')) gripHint = ' — fingers roll carefully across the leather';
+  else if (v.includes('spin') || v.includes('leg-break') || v.includes('off-break')) gripHint = ' — giving the ball extra air & revs';
+  return `👀 **Initial Release Hint:** The bowler ${spd}${gripHint}. *Commit your Stance, Footwork & Intent before reading the pitch!*`;
+}
+
+function buildFullDeliveryReveal(d) {
+  if (!d) return '';
+  return `🥎 **Full Delivery Read:** **${d.speed} ${d.variation}** pitched **${d.length}** on **${d.line}**!`;
+}
+
 function prepareNextDelivery(match) {
   if (match.phase !== 'batting') return;
   const bowlerType = match.attack ? match.attack.getCurrentBowler()?.type : null;
   const d = generateBowlerDelivery(match.pitch, bowlerType);
   match.nextDelivery = d;
   match.releaseHint = getReleaseHint(d.line, d.length, d.speed, d.variation);
+  match.releaseCue = buildInitialReleaseCue(d);
+  match.fullDeliveryReveal = buildFullDeliveryReveal(d);
 }
 
 function serializeMatchState(match) {
@@ -252,6 +275,8 @@ function serializeMatchState(match) {
     bowler: curBowler,
     bowlersCard: match.attack ? match.attack.bowlers : [],
     releaseHint: match.releaseHint,
+    releaseCue: match.releaseCue || buildInitialReleaseCue(match.nextDelivery),
+    fullDeliveryReveal: match.fullDeliveryReveal || buildFullDeliveryReveal(match.nextDelivery),
     timingProfile: match.phase === 'batting' ? computeTimingProfile(match) : null,
     fieldPreset: match.phase === 'batting' ? (match.nextDelivery?.fieldPreset || 'Balanced') : (match.lastFieldPreset || 'Balanced'),
     isPowerplay,

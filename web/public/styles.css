@@ -938,6 +938,24 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   margin-top: 10px;
   font-size: 0.82rem;
 }
+.release-banner.is-full-reveal {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), rgba(244, 63, 94, 0.12));
+  border-color: rgba(245, 158, 11, 0.55);
+  border-left-color: var(--gold);
+}
+@media (max-width: 960px) {
+  .arcade-grid { grid-template-columns: 1fr; }
+  .arcade-key-hint { display: none; }
+  .arcade-canvas-shell { aspect-ratio: 16 / 10; }
+  .scoreboard-banner { padding: 14px; }
+  .step-crumb { padding: 7px 8px; }
+  .profile-graphic-canvas { min-height: 210px; }
+}
+@media (max-width: 480px) {
+  .hud-vitals { gap: 5px; }
+  .hud-chip { font-size: 0.7rem; padding: 3px 7px; }
+  .outcome-badge { width: 42px; height: 42px; font-size: 1.2rem; }
+}
 
 @media (max-width: 560px) {
   .choice-grid-2 { grid-template-columns: 1fr; }
