@@ -125,7 +125,8 @@ export class CricketArcadeRenderer {
       selectedStance: 'In Line',
       selectedFootwork: 'Front Foot',
       selectedIntent: 'Stroke',
-      selectedZone: 'Cover',
+      selectedZone: null,
+      allowZoneClick: false,
       bowlPitchTarget: { line: 'Stumps', length: 'Good Length', wx: 0, wy: 24 }
     };
 
@@ -263,6 +264,7 @@ export class CricketArcadeRenderer {
       const ground = this.unprojectGround(sc.x, sc.y);
 
       if (this.state.phase === 'batting') {
+        if (!this.state.allowZoneClick) return;
         const ang = Math.atan2(ground.wy - STRIKER_Y, ground.wx);
         const zone = angleToZone(ang, this.state.isLeftHand);
         this.state.selectedZone = zone;
@@ -795,34 +797,36 @@ export class CricketArcadeRenderer {
     drawLine3D(-22, STRIKER_Y - 22, -22, STRIKER_Y + 10);
     drawLine3D(22, STRIKER_Y - 22, 22, STRIKER_Y + 10);
 
-    // 5. Interactive Aiming Wedge (Batting) or Pitch Target Marker (Bowling)
+    // 5. Interactive Aiming Wedge (Batting, only once user chooses a direction) or Pitch Target Marker (Bowling)
     if (!this.anim) {
       if (this.state.phase === 'batting') {
-        const ang = getZoneWorldAngle(this.state.selectedZone, this.state.isLeftHand);
-        const origP = this.project(0, STRIKER_Y, 6);
-        const dirX = Math.cos(ang), dirY = Math.sin(ang);
-        const dRope = this.distanceToBoundaryFromStriker(dirX, dirY);
-        const tipP = this.project(dirX * dRope * 0.72, STRIKER_Y + dirY * dRope * 0.72, 6);
-        const leftP = this.project(Math.cos(ang - 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang - 0.34) * dRope * 0.64, 4);
-        const rightP = this.project(Math.cos(ang + 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang + 0.34) * dRope * 0.64, 4);
+        if (this.state.selectedZone) {
+          const ang = getZoneWorldAngle(this.state.selectedZone, this.state.isLeftHand);
+          const origP = this.project(0, STRIKER_Y, 6);
+          const dirX = Math.cos(ang), dirY = Math.sin(ang);
+          const dRope = this.distanceToBoundaryFromStriker(dirX, dirY);
+          const tipP = this.project(dirX * dRope * 0.72, STRIKER_Y + dirY * dRope * 0.72, 6);
+          const leftP = this.project(Math.cos(ang - 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang - 0.34) * dRope * 0.64, 4);
+          const rightP = this.project(Math.cos(ang + 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang + 0.34) * dRope * 0.64, 4);
 
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
-        ctx.beginPath();
-        ctx.moveTo(origP.x, origP.y);
-        ctx.lineTo(leftP.x, leftP.y);
-        ctx.lineTo(tipP.x, tipP.y);
-        ctx.lineTo(rightP.x, rightP.y);
-        ctx.closePath();
-        ctx.fill();
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
+          ctx.beginPath();
+          ctx.moveTo(origP.x, origP.y);
+          ctx.lineTo(leftP.x, leftP.y);
+          ctx.lineTo(tipP.x, tipP.y);
+          ctx.lineTo(rightP.x, rightP.y);
+          ctx.closePath();
+          ctx.fill();
 
-        ctx.strokeStyle = '#fbbf24';
-        ctx.lineWidth = 2.4;
-        ctx.setLineDash([7, 5]);
-        ctx.beginPath();
-        ctx.moveTo(origP.x, origP.y);
-        ctx.lineTo(tipP.x, tipP.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 2.4;
+          ctx.setLineDash([7, 5]);
+          ctx.beginPath();
+          ctx.moveTo(origP.x, origP.y);
+          ctx.lineTo(tipP.x, tipP.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       } else {
         const pt = this.state.bowlPitchTarget;
         const p = this.project(pt.wx, pt.wy, 1);

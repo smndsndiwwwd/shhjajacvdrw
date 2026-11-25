@@ -94,30 +94,30 @@ export function computeTimingProfile(match, playerOpt = null) {
   if (!isSpin && skills.includes('pace_destroyer')) skillBonus += 5;
 
   const playerEdge = Math.round(
-    (attrs.timing || 15) * 0.55 +
+    (attrs.timing || 15) * 0.50 +
     (attrs.technique || 15) * 0.25 +
-    eqTimingBonus * 1.15 +
+    eqTimingBonus * 1.35 +
     (confidence - 50) * 0.14 +
     (form - 50) * 0.10 +
     skillBonus
   );
 
   const bowlerSkill = match.bowlerSkill || 45;
-  const speedThreat = deliv.speed === 'Fast' ? 12 : deliv.speed === 'Slow' ? 5 : 7;
+  const speedThreat = deliv.speed === 'Fast' ? 14 : deliv.speed === 'Slow' ? 6 : 8;
   const varName = String(deliv.variation || '');
   const varThreat = ['Googly', 'Doosra', 'Knuckle', 'Flipper', 'Reverse', 'Slower'].some(v => varName.includes(v))
-    ? 8
+    ? 9
     : ['Swing', 'Seam', 'Cutter', 'Drift', 'Inswinger', 'Outswinger'].some(v => varName.includes(v))
-      ? 4
+      ? 5
       : 0;
-  const pitchThreat = (match.pitch === 'Green Seamer' || match.pitch === 'Dusty Turn') ? 3 : 0;
+  const pitchThreat = (match.pitch === 'Green Seamer' || match.pitch === 'Dusty Turn') ? 4 : 0;
 
-  const bowlerThreat = Math.round(bowlerSkill * 0.42 + speedThreat + varThreat + pitchThreat);
+  const bowlerThreat = Math.round(bowlerSkill * 0.52 + speedThreat + varThreat + pitchThreat);
   const netDiff = playerEdge - bowlerThreat;
 
-  const sweetHalf = Math.round(Math.min(24, Math.max(12.5, 17 + netDiff * 0.14)) * 10) / 10;
-  const goodHalf = Math.round(Math.min(44, Math.max(34, sweetHalf + 21)) * 10) / 10;
-  const needleSpeed = Math.round(Math.min(1.08, Math.max(0.55, 0.80 - netDiff * 0.0042)) * 100) / 100;
+  const sweetHalf = Math.round(Math.min(24, Math.max(11.5, 16.5 + netDiff * 0.15)) * 10) / 10;
+  const goodHalf = Math.round(Math.min(44, Math.max(33, sweetHalf + 20.5)) * 10) / 10;
+  const needleSpeed = Math.round(Math.min(1.12, Math.max(0.54, 0.80 - netDiff * 0.0046)) * 100) / 100;
 
   return {
     sweetHalf,
@@ -299,6 +299,11 @@ function serializeMatchState(match) {
     releaseHint: match.releaseHint,
     releaseCue: match.releaseCue || buildInitialReleaseCue(match.nextDelivery),
     fullDeliveryReveal: match.fullDeliveryReveal || buildFullDeliveryReveal(match.nextDelivery),
+    currentBallPreview: match.nextDelivery ? {
+      length: match.nextDelivery.length,
+      line: match.nextDelivery.line,
+      speed: match.nextDelivery.speed
+    } : null,
     timingProfile: match.phase === 'batting' ? computeTimingProfile(match) : null,
     fieldPreset: match.phase === 'batting' ? (match.nextDelivery?.fieldPreset || 'Balanced') : (match.lastFieldPreset || 'Balanced'),
     isPowerplay,
@@ -770,6 +775,7 @@ export function playWebMatchBall(playerId, action = {}) {
       freeHitNext: match.bat.freeHit,
       timing: simResult.timing,
       shotName,
+      actualZone: isLeave ? 'In Line' : (simResult.actualZone || zone),
       delivery: deliv,
       commentary: simResult.commentary
     };

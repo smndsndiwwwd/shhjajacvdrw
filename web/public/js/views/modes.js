@@ -436,16 +436,18 @@ export async function renderChallengeView(container, state, refresh) {
 
       <div class="grid-2">
         <div class="card card-glow-cyan">
-          <h3>⚔️ Issue 1-Over Challenge Duel</h3>
-          <p style="color:var(--text-muted);font-size:0.85rem;margin:6px 0 14px;">Challenge another registered player online or take on the AI Challenger Bot in a 6-ball shootout!</p>
+          <h3>⚔️ Issue 1-Over PvP Challenge</h3>
+          <p style="color:var(--text-muted);font-size:0.85rem;margin:6px 0 14px;">Challenge another registered player (Level ${minLvl}+) in a live 1-over head-to-head PvP shootout!</p>
           <div style="display:flex;flex-direction:column;gap:10px;opacity:${challengeLocked ? '0.5' : '1'};pointer-events:${challengeLocked ? 'none' : 'auto'};">
             <div>
               <label class="label">Filter Rival (Name, Similar Name, or Unique ID)</label>
               <input id="chal-opp-filter" class="input" placeholder="Filter by name or ID (e.g. CA-1002)..." style="margin-bottom:8px;" />
-              <label class="label">Select Opponent</label>
+              <label class="label">Select Player Opponent (PvP)</label>
               <select id="chal-opp" class="select">
-                <option value="ai_rival">🤖 AI Challenger Bot (Instant Play)</option>
-                ${hub.rivals.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('')}
+                ${hub.rivals.length > 0
+                  ? hub.rivals.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('')
+                  : '<option value="">No eligible Level ' + minLvl + '+ human rivals available yet</option>'
+                }
               </select>
             </div>
             <div>
@@ -457,7 +459,7 @@ export async function renderChallengeView(container, state, refresh) {
                 ⚠️ You already have an ongoing <strong>${esc(myOngoingChallenge.status)}</strong> challenge (${fmtTimeLeft(myOngoingChallenge.expires_at) || 'active'}). Complete or cancel it before creating another!
               </div>
             ` : ''}
-            <button class="btn btn-primary" id="btn-create-chal" ${myOngoingChallenge || challengeLocked ? 'disabled' : ''}>${challengeLocked ? `🔒 Unlocks at Level ${minLvl}` : '⚔️ Launch Challenge'}</button>
+            <button class="btn btn-primary" id="btn-create-chal" ${myOngoingChallenge || challengeLocked || hub.rivals.length === 0 ? 'disabled' : ''}>${challengeLocked ? `🔒 Unlocks at Level ${minLvl}` : '⚔️ Launch PvP Challenge'}</button>
           </div>
         </div>
 
@@ -565,8 +567,9 @@ export async function renderChallengeView(container, state, refresh) {
         String(r.public_id || r.discord_id || '').toLowerCase().includes(q) ||
         String(r.primary_role || '').toLowerCase().includes(q)
       );
-      oppSel.innerHTML = `<option value="ai_rival">🤖 AI Challenger Bot (Instant Play)</option>` +
-        filtered.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('');
+      oppSel.innerHTML = filtered.length > 0
+        ? filtered.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('')
+        : '<option value="">No matching human rivals found</option>';
     };
   }
   document.querySelectorAll('.pvp-view-prof').forEach(b => b.onclick = () => {
@@ -580,6 +583,7 @@ export async function renderChallengeView(container, state, refresh) {
 
   document.getElementById('btn-create-chal').onclick = async () => {
     const opponent_id = document.getElementById('chal-opp').value;
+    if (!opponent_id) { toast('Select a human player to challenge!', 'error'); return; }
     const target_runs = Number(document.getElementById('chal-target').value) || 15;
     await api('/api/challenge/create', { method: 'POST', body: { opponent_id, target_runs } });
     toast('Challenge duel created!', 'success');

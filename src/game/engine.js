@@ -782,42 +782,42 @@ export const FIELD_PRESET_CONFIGS = {
       1: { infield: 1, outfield: 0, labels: ['Short Fine Leg'] },
       2: { infield: 0, outfield: 1, labels: ['Deep Square Leg'] },
       3: { infield: 0, outfield: 1, labels: ['Deep Mid-Wicket'] },
-      4: { infield: 2, outfield: 0, labels: ['Mid On', 'Long On (Up)'] },
+      4: { infield: 1, outfield: 0, labels: ['Long On (Up)'] },
       5: { infield: 2, outfield: 0, labels: ['Mid Off', 'Long Off (Up)'] },
       6: { infield: 1, outfield: 0, labels: ['Cover'] },
       7: { infield: 1, outfield: 0, labels: ['Point (Up)'] },
-      8: { infield: 0, outfield: 0, labels: [] }
+      8: { infield: 1, outfield: 0, labels: ['Slip'] }
     },
     normal: {
       1: { infield: 1, outfield: 0, labels: ['Short Fine Leg'] },
       2: { infield: 0, outfield: 1, labels: ['Deep Square Leg'] },
       3: { infield: 0, outfield: 1, labels: ['Deep Mid-Wicket'] },
-      4: { infield: 1, outfield: 1, labels: ['Mid On', 'Long On'] },
+      4: { infield: 0, outfield: 1, labels: ['Long On'] },
       5: { infield: 1, outfield: 1, labels: ['Mid Off', 'Long Off'] },
       6: { infield: 1, outfield: 0, labels: ['Cover'] },
       7: { infield: 0, outfield: 1, labels: ['Deep Point'] },
-      8: { infield: 0, outfield: 0, labels: [] }
+      8: { infield: 1, outfield: 0, labels: ['Slip'] }
     }
   },
   Attacking: {
     powerplay: {
       1: { infield: 1, outfield: 0, labels: ['Short Leg'] },
       2: { infield: 0, outfield: 0, labels: [] },
-      3: { infield: 1, outfield: 1, labels: ['Mid Wicket', 'Deep Mid Wicket'] },
-      4: { infield: 0, outfield: 0, labels: [] },
+      3: { infield: 0, outfield: 1, labels: ['Deep Mid Wicket'] },
+      4: { infield: 1, outfield: 0, labels: ['Mid On'] },
       5: { infield: 0, outfield: 1, labels: ['Long Off'] },
-      6: { infield: 2, outfield: 0, labels: ['Silly Point', 'Cover'] },
-      7: { infield: 0, outfield: 0, labels: [] },
+      6: { infield: 1, outfield: 0, labels: ['Cover'] },
+      7: { infield: 1, outfield: 0, labels: ['Point'] },
       8: { infield: 3, outfield: 0, labels: ['Slip 1', 'Slip 2', 'Gully'] }
     },
     normal: {
       1: { infield: 1, outfield: 0, labels: ['Short Leg'] },
       2: { infield: 0, outfield: 0, labels: [] },
-      3: { infield: 1, outfield: 1, labels: ['Mid Wicket', 'Deep Mid Wicket'] },
-      4: { infield: 0, outfield: 0, labels: [] },
+      3: { infield: 0, outfield: 1, labels: ['Deep Mid Wicket'] },
+      4: { infield: 1, outfield: 0, labels: ['Mid On'] },
       5: { infield: 0, outfield: 1, labels: ['Long Off'] },
-      6: { infield: 2, outfield: 0, labels: ['Silly Point', 'Cover'] },
-      7: { infield: 0, outfield: 0, labels: [] },
+      6: { infield: 1, outfield: 0, labels: ['Cover'] },
+      7: { infield: 1, outfield: 0, labels: ['Point'] },
       8: { infield: 3, outfield: 0, labels: ['Slip 1', 'Slip 2', 'Gully'] }
     }
   },
@@ -828,9 +828,9 @@ export const FIELD_PRESET_CONFIGS = {
       3: { infield: 1, outfield: 0, labels: ['Deep Mid Wicket (Up)'] },
       4: { infield: 2, outfield: 0, labels: ['Mid On', 'Long On (Up)'] },
       5: { infield: 1, outfield: 0, labels: ['Long Off (Up)'] },
-      6: { infield: 1, outfield: 0, labels: ['Deep Cover (Up)'] },
+      6: { infield: 1, outfield: 0, labels: ['Cover'] },
       7: { infield: 1, outfield: 0, labels: ['Point'] },
-      8: { infield: 1, outfield: 0, labels: ['Deep Third Man (Up)'] }
+      8: { infield: 1, outfield: 0, labels: ['Third Man'] }
     },
     normal: {
       1: { infield: 0, outfield: 1, labels: ['Deep Fine Leg'] },
@@ -838,9 +838,9 @@ export const FIELD_PRESET_CONFIGS = {
       3: { infield: 0, outfield: 1, labels: ['Deep Mid Wicket'] },
       4: { infield: 1, outfield: 1, labels: ['Mid On', 'Long On'] },
       5: { infield: 0, outfield: 1, labels: ['Long Off'] },
-      6: { infield: 1, outfield: 0, labels: ['Deep Cover (Up)'] },
+      6: { infield: 1, outfield: 0, labels: ['Cover'] },
       7: { infield: 1, outfield: 0, labels: ['Point'] },
-      8: { infield: 1, outfield: 0, labels: ['Deep Third Man (Up)'] }
+      8: { infield: 1, outfield: 0, labels: ['Third Man'] }
     }
   }
 };
@@ -1058,14 +1058,16 @@ export function simulateBallAdvanced({
   const isFrontFootToShort = effectiveFootwork === 'Front Foot' && actualLength === 'Short' && effectiveIntent !== 'Push';
   const isCreaseLoftToYorker = effectiveFootwork !== 'Advanced' && effectiveIntent === 'Loft' && actualLength === 'Yorker';
   const isPullOnFullOrYorker = isPull && (actualLength === 'Full' || actualLength === 'Yorker');
-  const isCrossLineDrag = (line === 'Off Side' || line === 'Wide') && ['Mid Wicket', 'Square Leg', 'Fine Leg'].includes(effectiveZone);
+  const isCrossLineDrag = (line === 'Off Side' || line === 'Wide') && ['Mid Wicket', 'Square Leg', 'Fine Leg', 'Long On'].includes(effectiveZone);
+  const isWrongSideCut = line === 'Leg Side' && ['Third Man', 'Point', 'Cover'].includes(effectiveZone);
 
   // Calculate Mismatch Severity
   let mismatchSeverity = 0;
   if (isPullOnFullOrYorker) mismatchSeverity += 2.0;
   if (isBackFootToFull && !isPullOnFullOrYorker) mismatchSeverity += 1.5;
   if (isCrossLineDrag) mismatchSeverity += 1.5;
-  if (isDeceivedByPace && (isBackFootToFull || isPullOnFullOrYorker)) mismatchSeverity += 1.5;
+  if (isWrongSideCut) mismatchSeverity += 1.75;
+  if (isDeceivedByPace && (isBackFootToFull || isPullOnFullOrYorker || isWrongSideCut)) mismatchSeverity += 1.5;
   if (isFrontFootToShort) mismatchSeverity += 2.0;
   if (isCreaseLoftToYorker) mismatchSeverity += 2.0;
 
@@ -1318,6 +1320,44 @@ export function simulateBallAdvanced({
 
   matchupStar = Math.min(5, Math.max(1, matchupStar));
 
+  // Equipment, Confidence & Bowler Difficulty Factors
+  const eqTech = Number(eqBonuses?.technique || 0);
+  const eqTiming = Number(eqBonuses?.timing || 0);
+  const eqPower = Number(eqBonuses?.power || 0);
+  const effBowlerSkill = Math.min(95, Math.max(25, Number(bowlerSkill || 45)));
+  const isDeceptiveCraft = ['googly', 'doosra', 'knuckle', 'flipper', 'reverse', 'swing', 'cutter', 'slower', 'carrom'].some(k => vLower.includes(k));
+  const craftThreat = isDeceptiveCraft ? 10 : 3;
+  const controlScore = (techVal * 0.58) + (eqTech * 0.65) + (eqTiming * 0.60) + ((confidence - 50) * 0.14);
+  const bowlerPressure = (effBowlerSkill * 0.68) + craftThreat + ((pLower.includes('green') || pLower.includes('dust') || pLower.includes('turn')) ? 6 : 0);
+  const controlDiff = controlScore - bowlerPressure; // positive = batter in control, negative = bowler dominates
+
+  let finalZone = zoneNum;
+  let directionMismatchOccurred = false;
+  let directionMismatchNote = '';
+
+  // Shot & Direction Mismatch check: happens more against tough bowlers / deceptive balls / cross-line swings, prevented by good gear & technique
+  if (effectiveIntent !== 'Push') {
+    const mismatchBase = isWrongSideCut || isCrossLineDrag ? 0.34 : (effectiveIntent === 'Loft' ? 0.14 : 0.08);
+    const mismatchChance = Math.min(0.62, Math.max(0.03, mismatchBase - (controlDiff * 0.0045) - ((matchupStar - 3) * 0.035)));
+    if (Math.random() < mismatchChance) {
+      directionMismatchOccurred = true;
+      // Deflect off the outside/inside half away from intended line!
+      const rawShift = (line === 'Off Side' || line === 'Wide')
+        ? (Math.random() < 0.65 ? 2 : 1) // Outside edge toward Point / Third Man
+        : (line === 'Leg Side')
+          ? (Math.random() < 0.65 ? -2 : -1) // Leading edge / cramped towards Fine Leg / Square Leg
+          : (Math.random() < 0.5 ? 1 : -1);
+      finalZone = ((zoneNum - 1 + rawShift + 8) % 8) + 1;
+      const intendedName = ZONE_NAMES[zoneNum] || effectiveZone;
+      const actualName = ZONE_NAMES[finalZone] || 'Gap';
+      directionMismatchNote = `⚡ **Shot-Direction Mismatch!** ${effBowlerSkill >= 60 ? 'Skilful bowling' : 'Late movement'} cramped the swing — aimed for **${intendedName}**, deflected off the splice towards **${actualName}**! `;
+      if (adjustedTiming === 'Perfect') {
+        adjustedTiming = rawShift > 0 ? 'Slightly Late' : 'Slightly Early';
+      }
+      matchupStar = Math.max(1, matchupStar - 1.0);
+    }
+  }
+
   // 3. Timing Outcome Simulation
   if (adjustedTiming.includes('Very')) {
     // MISS
@@ -1355,8 +1395,7 @@ export function simulateBallAdvanced({
     }
   } else if (adjustedTiming.includes('Slightly')) {
     // CONNECTS BUT REDUCED QUALITY
-    let finalZone = zoneNum;
-    if (Math.random() < 0.5) {
+    if (!directionMismatchOccurred && Math.random() < Math.min(0.68, Math.max(0.28, 0.48 - controlDiff * 0.004))) {
       const shift = Math.random() < 0.5 ? -1 : 1;
       finalZone = ((zoneNum - 1 + shift + 8) % 8) + 1;
     }
@@ -1368,20 +1407,35 @@ export function simulateBallAdvanced({
       commentary = `🛡️ Played defensively with slightly off-timing. Safely blocked. Dot ball.`;
       outcomeType = 'Dot';
     } else {
-      const isLofted = effectiveIntent === 'Loft' || 
-                       intent === 'Loft' || 
-                       shotType === 'Lofted Drive' || 
-                       shotType === 'Slog Sweep' || 
-                       shotType === 'Hook Shot' || 
-                       effectiveShot.toLowerCase().includes('loft') || 
+      const isLofted = effectiveIntent === 'Loft' ||
+                       intent === 'Loft' ||
+                       shotType === 'Lofted Drive' ||
+                       shotType === 'Slog Sweep' ||
+                       shotType === 'Hook Shot' ||
+                       effectiveShot.toLowerCase().includes('loft') ||
                        effectiveShot.toLowerCase().includes('slog') ||
                        effectiveShot.toLowerCase().includes('hook') ||
                        effectiveShot.toLowerCase().includes('six');
       const catchRoll = Math.random() * 100;
+      const bowlerDangerMod = Math.max(-10, Math.min(18, (effBowlerSkill - 45) * 0.35 - (eqTech * 0.3)));
 
       if (isLofted) {
-        if (zoneFielding.infield > 0) {
-          if (catchRoll < 45 && !isFreeHit) {
+        if (zoneFielding.infield > 0 && zoneFielding.outfield > 0) {
+          if (catchRoll < (52 + bowlerDangerMod) && !isFreeHit) {
+            wicket = true;
+            dismissalType = 'caught';
+            const catcher = zoneFielding.labels[0] || 'fielder';
+            commentary = `💔 CAUGHT! Mistimed aerial shot picked out ${catcher} waiting in Zone ${finalZone} (${zName})!`;
+            outcomeType = 'Out';
+          } else {
+            runs = Math.random() < 0.55 ? 1 : 0;
+            commentary = runs === 1
+              ? `🏏 Mistimed loft drops just out of ${zoneFielding.labels[0] || 'fielder'}'s reach in Zone ${finalZone} (${zName}) for a single.`
+              : `💥 Swatted straight to the fielder in Zone ${finalZone} (${zName}) on the bounce. Dot ball.`;
+            outcomeType = runs === 1 ? 'Run' : 'Dot';
+          }
+        } else if (zoneFielding.infield > 0) {
+          if (catchRoll < (46 + bowlerDangerMod) && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
             const catcher = zoneFielding.labels.filter(l => !l.startsWith('Deep') && !l.startsWith('Long')).join(' / ') || 'infielder';
@@ -1389,26 +1443,26 @@ export function simulateBallAdvanced({
             outcomeType = 'Out';
           } else {
             runs = 1;
-            commentary = `🏏 Sliced aerially towards Zone ${finalZone} (${zName}). It evades the fielder inside the circle and drops safely for a single.`;
+            commentary = `🏏 Sliced aerially towards Zone ${finalZone} (${zName}). It evades ${zoneFielding.labels[0] || 'the fielder'} inside the circle and drops safely for a single.`;
             outcomeType = 'Run';
           }
         } else if (zoneFielding.outfield > 0) {
-          if (catchRoll < 35 && !isFreeHit) {
+          if (catchRoll < (44 + bowlerDangerMod) && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
             const catcher = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'deep fielder';
-            commentary = `💔 CAUGHT! Sliced high into the deep. ${catcher} runs under it and takes a safe catch in Zone ${finalZone} (${zName})!`;
+            commentary = `💔 CAUGHT! Sliced high into the deep. ${catcher} settles under it and takes the catch in Zone ${finalZone} (${zName})!`;
             outcomeType = 'Out';
           } else {
-            runs = (matchupStar > 2.0) ? 2 : 1;
-            commentary = `🏏 Lofted safely into the deep pocket in Zone ${finalZone} (${zName}) for ${runs} runs.`;
+            runs = (matchupStar > 2.5 && Math.random() < 0.5) ? 2 : 1;
+            commentary = `🏏 Lofted into the deep towards ${zoneFielding.labels[0] || 'the sweeper'} in Zone ${finalZone} (${zName}), kept to ${runs} run${runs > 1 ? 's' : ''}.`;
             outcomeType = 'Run';
           }
         } else {
           // Vacant Zone!
-          if (matchupStar >= 2.5 && powerVal >= 45) {
+          if (!directionMismatchOccurred && matchupStar >= 3.0 && (powerVal + eqPower * 0.5) >= 55 && Math.random() < 0.65) {
             runs = 4;
-            commentary = `🔥 FOUR! Mistimed slightly, but with Zone ${finalZone} (${zName}) completely vacant, the ball runs all the way to the rope!`;
+            commentary = `🔥 FOUR! Mistimed slightly, but with Zone ${finalZone} (${zName}) completely vacant, it still trickles to the rope!`;
             outcomeType = 'Four';
           } else {
             runs = (isModerateMismatch || matchupStar <= 2.0) ? 1 : 2;
@@ -1417,24 +1471,30 @@ export function simulateBallAdvanced({
           }
         }
       } else {
-        // Ground shot
-        if (zoneFielding.infield > 0) {
-          if (matchupStar >= 3.0 && Math.random() < 0.55) {
+        // Ground shot with Slightly off timing
+        if (zoneFielding.infield > 0 && zoneFielding.outfield > 0) {
+          runs = (matchupStar >= 3.5 && Math.random() < 0.35) ? 1 : 0;
+          commentary = runs === 1
+            ? `🏃 Deflected past the infielder, deep fielder cuts it off in Zone ${finalZone} (${zName}) for 1.`
+            : `💥 Hit straight to ${zoneFielding.labels[0] || 'the fielder'} guarding Zone ${finalZone} (${zName}). Dot ball.`;
+          outcomeType = runs === 1 ? 'Run' : 'Dot';
+        } else if (zoneFielding.infield > 0) {
+          if (matchupStar >= 3.0 && !directionMismatchOccurred && Math.random() < 0.45) {
             runs = 1;
             commentary = `🏃 Pushed off the splice past ${zoneFielding.labels[0] || 'the fielder'} in Zone ${finalZone} (${zName}) for a quick single.`;
             outcomeType = 'Run';
           } else {
             runs = 0;
-            commentary = `💥 Hit on the bounce to ${zoneFielding.labels[0] || 'the fielder'} in Zone ${finalZone} (${zName}), blocked cleanly. Dot ball.`;
+            commentary = `💥 Hit on the bounce straight to ${zoneFielding.labels[0] || 'the fielder'} in Zone ${finalZone} (${zName}), stopped cleanly. Dot ball.`;
             outcomeType = 'Dot';
           }
         } else if (zoneFielding.outfield > 0) {
-          runs = 1;
-          commentary = `🏏 Driven past the vacant ring towards the deep fielder in Zone ${finalZone} (${zName}) for a single.`;
+          runs = (matchupStar >= 3.0 && Math.random() < 0.45) ? 2 : 1;
+          commentary = `🏏 Driven through the vacant ring to ${zoneFielding.labels[0] || 'the deep fielder'} in Zone ${finalZone} (${zName}) for ${runs}.`;
           outcomeType = 'Run';
         } else {
           // Completely vacant
-          if (matchupStar >= 2.5 && powerVal >= 40) {
+          if (!directionMismatchOccurred && matchupStar >= 3.0 && powerVal >= 50 && Math.random() < 0.65) {
             runs = 4;
             commentary = `🔥 FOUR! Placed through the completely vacant Zone ${finalZone} (${zName}) along the turf for a boundary!`;
             outcomeType = 'Four';
@@ -1448,25 +1508,24 @@ export function simulateBallAdvanced({
     }
   } else {
     // PERFECT TIMING!
-    const finalZone = zoneNum;
     const zoneFielding = getZoneFielding(fieldPreset, isPowerplay, finalZone);
     const zName = ZONE_NAMES[finalZone] || `Zone ${finalZone}`;
 
-    const isLofted = effectiveIntent === 'Loft' || 
-                     intent === 'Loft' || 
-                     shotType === 'Lofted Drive' || 
-                     shotType === 'Slog Sweep' || 
-                     shotType === 'Hook Shot' || 
-                     effectiveShot.toLowerCase().includes('loft') || 
-                     effectiveShot.toLowerCase().includes('slog') || 
-                     effectiveShot.toLowerCase().includes('hook') || 
+    const isLofted = effectiveIntent === 'Loft' ||
+                     intent === 'Loft' ||
+                     shotType === 'Lofted Drive' ||
+                     shotType === 'Slog Sweep' ||
+                     shotType === 'Hook Shot' ||
+                     effectiveShot.toLowerCase().includes('loft') ||
+                     effectiveShot.toLowerCase().includes('slog') ||
+                     effectiveShot.toLowerCase().includes('hook') ||
                      effectiveShot.toLowerCase().includes('six');
 
     if (effectiveIntent === 'Push' || intent === 'Defensive' || intent === 'Defensive Shot') {
       if (zoneFielding.infield > 0) {
-        runs = Math.random() < 0.4 ? 1 : 0;
+        runs = Math.random() < 0.32 ? 1 : 0;
         commentary = runs === 1
-          ? `🛡️ Soft hands defense. You guide it into the gap beside ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) for a sharp single!`
+          ? `🛡️ Soft hands defense. Guided into the gap beside ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) for a sharp single!`
           : `🛡️ Rock-solid defense straight to ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Dot ball.`;
         outcomeType = runs === 1 ? 'Run' : 'Dot';
       } else {
@@ -1475,21 +1534,20 @@ export function simulateBallAdvanced({
         outcomeType = 'Run';
       }
     } else {
-      let effectivePower = powerVal;
-      if (matchupStar >= 4.5) {
-        effectivePower += 25;
-      } else if (matchupStar >= 4.0) {
-        effectivePower += 15;
-      } else if (matchupStar <= 2.0) {
-        effectivePower -= 20;
-      }
+      let effectivePower = powerVal + Math.round(eqPower * 0.45);
+      if (matchupStar >= 4.5) effectivePower += 20;
+      else if (matchupStar >= 4.0) effectivePower += 10;
+      else if (matchupStar <= 2.0) effectivePower -= 22;
+
+      const clearEdge = effectivePower - Math.round(effBowlerSkill * 0.38);
+      const deepFielderName = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || zoneFielding.labels[0] || 'deep fielder';
+      const ringFielderName = zoneFielding.labels[0] || 'infielder';
 
       if (isLofted) {
         if (zoneFielding.total === 0) {
-          // Completely vacant zone
-          if (effectivePower >= 40) {
+          if (clearEdge >= 28 && effectivePower >= 48) {
             runs = 6;
-            commentary = `🚀 SIX! Perfectly timed lofted shot into the completely vacant Zone ${finalZone} (${zName})! Sails way over the ropes!`;
+            commentary = `🚀 SIX! Perfectly timed lofted shot into the completely vacant Zone ${finalZone} (${zName})! Sails cleanly over the ropes!`;
             outcomeType = 'Six';
           } else {
             runs = 4;
@@ -1497,128 +1555,111 @@ export function simulateBallAdvanced({
             outcomeType = 'Four';
           }
         } else if (zoneFielding.outfield === 0) {
-          // Infielders present, but NO boundary rider!
-          if (effectivePower >= 55) {
-            runs = 6;
-            commentary = `🚀 SIX! Cleared the infield with supreme ease and sails way into the undefended stands in Zone ${finalZone} (${zName})!`;
-            outcomeType = 'Six';
-          } else if (effectivePower >= 30) {
-            runs = 4;
-            commentary = `🔥 FOUR! Lofted cleanly over the 30-yard circle into the empty deep grass in Zone ${finalZone} (${zName}) for four!`;
-            outcomeType = 'Four';
-          } else {
-            // Underpowered loft into infield (< 30 power)
-            const catchRoll = Math.random() * 100;
-            if (catchRoll < 35 && !isFreeHit) {
-              wicket = true;
-              dismissalType = 'caught';
-              const catcher = zoneFielding.labels.filter(l => !l.startsWith('Deep') && !l.startsWith('Long')).join(' / ') || 'infielder';
-              commentary = `💔 CAUGHT! Chipped softly into the circle. ${catcher} accepts an easy catch in Zone ${finalZone} (${zName})!`;
-              outcomeType = 'Out';
-            } else {
-              runs = 1;
-              commentary = `🏏 Chipped over the infielder in Zone ${finalZone} (${zName}) and lands safely for a single.`;
-              outcomeType = 'Run';
-            }
-          }
-        } else {
-          // Deep fielder(s) present!
-          const catchRoll = Math.random() * 100;
-          if (effectivePower >= 85 && !isModerateMismatch) {
-            if (catchRoll < 12 && !isFreeHit) {
-              wicket = true;
-              dismissalType = 'caught';
-              const catcher = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'deep fielder';
-              commentary = `💔 CAUGHT AT THE BOUNDARY! ${catcher} pulls off a spectacular leaping catch right on the rope in Zone ${finalZone} (${zName})!`;
-              outcomeType = 'Out';
-            } else {
+          const ringCatchRisk = Math.max(8, Math.min(28, 22 - controlDiff * 0.2));
+          if (effectivePower >= 42 && Math.random() * 100 >= ringCatchRisk) {
+            if (clearEdge >= 38 && effectivePower >= 62 && Math.random() < 0.72) {
               runs = 6;
-              commentary = `🚀 SIX! Massive strike! Timed to perfection, it sails way over ${zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'the deep fielder'} in Zone ${finalZone} (${zName})!`;
+              commentary = `🚀 SIX! Cleared ${ringFielderName} cleanly and sails into the undefended stands in Zone ${finalZone} (${zName})!`;
               outcomeType = 'Six';
-            }
-          } else if (effectivePower >= 60 && !isModerateMismatch) {
-            if (catchRoll < 30 && !isFreeHit) {
-              wicket = true;
-              dismissalType = 'caught';
-              const catcher = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'deep fielder';
-              commentary = `💔 CAUGHT! Struck well, but picked out ${catcher} right on the boundary in Zone ${finalZone} (${zName})!`;
-              outcomeType = 'Out';
             } else {
               runs = 4;
-              commentary = `🔥 FOUR! Lofted over ${zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'the fielder'} in Zone ${finalZone} (${zName}) and one-bounces over the rope!`;
+              commentary = `🔥 FOUR! Lofted over ${ringFielderName} into empty deep grass in Zone ${finalZone} (${zName}) for four!`;
               outcomeType = 'Four';
             }
+          } else if (Math.random() < 0.38 && !isFreeHit) {
+            wicket = true;
+            dismissalType = 'caught';
+            commentary = `💔 CAUGHT! Didn't quite get elevation over ${ringFielderName} in Zone ${finalZone} (${zName}) — sharp ring catch!`;
+            outcomeType = 'Out';
           } else {
-            // Power < 60
-            if (catchRoll < 50 && !isFreeHit) {
-              wicket = true;
-              dismissalType = 'caught';
-              if (effectivePower < 50 && zoneFielding.infield > 0) {
-                const catcher = zoneFielding.labels.filter(l => !l.startsWith('Deep') && !l.startsWith('Long')).join(' / ') || 'infielder';
-                commentary = `💔 CAUGHT! Lacks power and elevation. A comfortable catch for ${catcher} inside the circle in Zone ${finalZone} (${zName})!`;
-              } else {
-                const catcher = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'deep fielder';
-                commentary = `💔 CAUGHT! Didn't get enough of it. Settles into the hands of ${catcher} in Zone ${finalZone} (${zName})!`;
-              }
-              outcomeType = 'Out';
-            } else {
-              runs = (isModerateMismatch || matchupStar <= 2.0) ? 1 : 2;
-              commentary = `🏏 Lofted into no man's land in Zone ${finalZone} (${zName}) for ${runs} runs.`;
-              outcomeType = 'Run';
-            }
+            runs = 2;
+            commentary = `🏏 Chipped just past ${ringFielderName} into open space in Zone ${finalZone} (${zName}) for 2 runs.`;
+            outcomeType = 'Run';
+          }
+        } else {
+          // Deep fielder stationed on the rope in Zone! High catch / cut-off risk!
+          const roll = Math.random() * 100;
+          const sixCap = (!isModerateMismatch && clearEdge >= 42 && effectivePower >= 82)
+            ? Math.min(28, 12 + Math.max(0, (clearEdge - 42) * 0.4))
+            : (!isModerateMismatch && effectivePower >= 65 ? 10 : 0);
+          const fourCap = !isModerateMismatch && effectivePower >= 55 ? 14 : 6;
+          const catchCap = Math.max(24, Math.min(48, 36 + (effBowlerSkill - 50) * 0.25 - eqPower * 0.25));
+
+          if (roll < catchCap && !isFreeHit) {
+            wicket = true;
+            dismissalType = 'caught';
+            commentary = `💔 CAUGHT IN THE DEEP! Aimed straight at ${deepFielderName} patrolling Zone ${finalZone} (${zName}) — takes a clean boundary catch!`;
+            outcomeType = 'Out';
+          } else if (roll < catchCap + sixCap) {
+            runs = 6;
+            commentary = `🚀 SIX! Colossal strike clears even ${deepFielderName} on the rope in Zone ${finalZone} (${zName})!`;
+            outcomeType = 'Six';
+          } else if (roll < catchCap + sixCap + fourCap) {
+            runs = 4;
+            commentary = `🔥 FOUR! Just eludes ${deepFielderName}'s diving reach in Zone ${finalZone} (${zName}) and reaches the fence!`;
+            outcomeType = 'Four';
+          } else {
+            runs = (isModerateMismatch || Math.random() < 0.45) ? 1 : 2;
+            commentary = `🏃 Lofted towards ${deepFielderName} on the boundary in Zone ${finalZone} (${zName}) — fielded on the bounce, kept to ${runs} run${runs > 1 ? 's' : ''}!`;
+            outcomeType = 'Run';
           }
         }
       } else {
-        // Ground stroke
+        // Ground stroke with stationed fielders
+        const roll = Math.random() * 100;
         if (zoneFielding.total === 0) {
-          runs = 4;
-          commentary = `🔥 FOUR! Stroked along the turf with perfect timing through the completely vacant Zone ${finalZone} (${zName})!`;
-          outcomeType = 'Four';
-        } else if (zoneFielding.infield === 0 && zoneFielding.outfield > 0) {
-          if (effectivePower >= 45) {
+          if (Math.random() < 0.85) {
             runs = 4;
-            commentary = `🔥 FOUR! Driven crisply through the open ring in Zone ${finalZone} (${zName}), beating the deep fielder to the rope!`;
+            commentary = `🔥 FOUR! Stroked cleanly through the completely vacant Zone ${finalZone} (${zName}) to the rope!`;
             outcomeType = 'Four';
           } else {
-            runs = 2;
-            commentary = `🏃 Stroked past the empty inner ring in Zone ${finalZone} (${zName}). The deep fielder cuts it off for two.`;
+            runs = 3;
+            commentary = `🏃 Placed into the wide open gap in Zone ${finalZone} (${zName}) — chased down near the rope for 3 runs!`;
             outcomeType = 'Run';
           }
-        } else if (zoneFielding.infield > 0) {
-          if (zoneFielding.outfield === 0) {
-            // Infielders present, but NO deep boundary rider!
-            if (effectivePower >= 30) {
-              runs = 4;
-              commentary = `🔥 FOUR! Pierces the infield dive of ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) and races away across the undefended boundary!`;
-              outcomeType = 'Four';
-            } else {
-              runs = (matchupStar >= 3.0) ? 1 : 0;
-              commentary = runs === 1
-                ? `🏃 Soft hands past ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) for a quick single.`
-                : `💥 Struck straight to ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Dot ball.`;
-              outcomeType = runs === 1 ? 'Run' : 'Dot';
-            }
+        } else if (zoneFielding.infield === 0 && zoneFielding.outfield > 0) {
+          const fourChance = Math.max(12, Math.min(36, 16 + (clearEdge * 0.35)));
+          if (!isModerateMismatch && roll < fourChance) {
+            runs = 4;
+            commentary = `🔥 FOUR! Crisply timed through the open ring, beating ${deepFielderName} to the fence in Zone ${finalZone} (${zName})!`;
+            outcomeType = 'Four';
           } else {
-            // Deep fielder present!
-            if (effectivePower >= 75 && !isModerateMismatch) {
-              runs = (effectivePower >= 85 || Math.random() < 0.6) ? 4 : 2;
-              commentary = runs === 4
-                ? `🔥 FOUR! Bludgeoned with extreme pace! Pierces both ${zoneFielding.labels[0]} and the deep fielder in Zone ${finalZone} (${zName})!`
-                : `🏃 Crushed past the diving ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}), deep fielder keeps it to two runs.`;
-              outcomeType = runs === 4 ? 'Four' : 'Run';
-            } else if (effectivePower >= 50 && !isModerateMismatch && matchupStar > 2.5) {
-              runs = (Math.random() < 0.5) ? 4 : 2;
-              commentary = runs === 4
-                ? `🔥 FOUR! Driven past ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) and splits the deep fielders perfectly to the rope!`
-                : `🏃 Placed neatly into the gap beside ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) for 2 runs.`;
-              outcomeType = runs === 4 ? 'Four' : 'Run';
-            } else {
-              runs = (matchupStar >= 3.5 && Math.random() < 0.45) ? 1 : 0;
-              commentary = runs === 0
-                ? `💥 Struck straight to ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Dot ball.`
-                : `🏃 Pushed firmly to ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Sharp single taken.`;
-              outcomeType = runs === 0 ? 'Dot' : 'Run';
-            }
+            runs = roll < 75 ? 2 : 1;
+            commentary = `🏃 Stroked into the deep gap in Zone ${finalZone} (${zName}), cleanly cut off by ${deepFielderName} for ${runs} run${runs > 1 ? 's' : ''}.`;
+            outcomeType = 'Run';
+          }
+        } else if (zoneFielding.infield > 0 && zoneFielding.outfield === 0) {
+          const fourChance = Math.max(18, Math.min(44, 24 + (clearEdge * 0.35)));
+          const dotChance = Math.max(22, Math.min(42, 34 - (clearEdge * 0.25)));
+          if (!isModerateMismatch && roll < fourChance) {
+            runs = 4;
+            commentary = `🔥 FOUR! Threaded past ${ringFielderName}'s dive in Zone ${finalZone} (${zName}) and races across the open outfield for four!`;
+            outcomeType = 'Four';
+          } else if (roll < fourChance + dotChance) {
+            runs = 0;
+            commentary = `💥 Stroked cleanly, but straight into ${ringFielderName} inside the ring in Zone ${finalZone} (${zName}). Dot ball.`;
+            outcomeType = 'Dot';
+          } else {
+            runs = 1;
+            commentary = `🏃 Half-stopped by ${ringFielderName} in Zone ${finalZone} (${zName}), batters pinch a sharp single.`;
+            outcomeType = 'Run';
+          }
+        } else {
+          // DOUBLE-GUARDED Zone (both ring + deep fielder stationed there)! Boundary must be rare!
+          const fourChance = (!isModerateMismatch && clearEdge >= 30) ? Math.min(18, 6 + (clearEdge - 30) * 0.28) : 5;
+          const dotChance = Math.max(18, Math.min(35, 28 - (clearEdge * 0.2)));
+          if (roll < fourChance) {
+            runs = 4;
+            commentary = `🔥 FOUR! Precision placement threads the needle past both ${ringFielderName} and ${deepFielderName} in Zone ${finalZone} (${zName})!`;
+            outcomeType = 'Four';
+          } else if (roll < fourChance + dotChance) {
+            runs = 0;
+            commentary = `💥 Fired straight at ${ringFielderName} in tightly packed Zone ${finalZone} (${zName}) — no run!`;
+            outcomeType = 'Dot';
+          } else {
+            runs = (clearEdge >= 25 && Math.random() < 0.38) ? 2 : 1;
+            commentary = `🏃 Driven through the ring toward ${deepFielderName} patrolling Zone ${finalZone} (${zName}) — fielded smoothly for ${runs} run${runs > 1 ? 's' : ''}.`;
+            outcomeType = 'Run';
           }
         }
       }
@@ -1655,6 +1696,7 @@ export function simulateBallAdvanced({
   if (pitchModifierText) finalCommentary += pitchModifierText;
   if (bowlerMissText) finalCommentary += bowlerMissText;
   if (stancePenaltyText) finalCommentary += `⚠️ ${stancePenaltyText}`;
+  if (directionMismatchNote) finalCommentary += directionMismatchNote;
   if (equippedShot && effectiveFootwork !== 'Leave' && outcomeType !== 'Extra') {
     finalCommentary += `🏏 **[${equippedShot.num} ${equippedShot.name}]** ${commentary}`;
   } else {
@@ -1667,6 +1709,8 @@ export function simulateBallAdvanced({
     dismissalType,
     timing: adjustedTiming,
     matchupStar,
+    actualZone: ZONE_NAMES[finalZone] || effectiveZone,
+    directionMismatch: directionMismatchOccurred,
     commentary: finalCommentary,
     outcomeType,
     nextIsFreeHit,

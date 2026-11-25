@@ -1,4 +1,5 @@
 import { api, esc, formatRichText, toast } from '../api.js';
+import { caIcon } from '../components/icons.js';
 import { renderHawkEyePitchSVG } from '../components/gearSvg.js';
 import { CricketArcadeRenderer, WAGON_ZONES } from '../engine/cricketCanvas.js';
 import { cricketAudio } from '../engine/cricketAudio.js';
@@ -8,6 +9,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
   let renderer = null;
   let busy = false;
   let resultTimer = null;
+  let pollTimer = null;
   let showingFinalResult = ['completed', 'expired', 'forfeited'].includes(duel.status);
 
   // Step-by-step controls state
@@ -15,7 +17,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
   let selStance = null;
   let selFootwork = null;
   let selIntent = null;
-  let selZone = 'Cover';
+  let selZone = null;
 
   let bowlStep = 'line';
   let selLine = null;
@@ -74,8 +76,13 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     return `${mins}m ${String(secs).padStart(2, '0')}s left`;
   };
 
+  const stopPoll = () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  };
+
   const cleanup = () => {
     stopNeedle();
+    stopPoll();
     if (resultTimer) { clearTimeout(resultTimer); resultTimer = null; }
     window.removeEventListener('keydown', onKeyDown);
     if (renderer) { renderer.destroy(); renderer = null; }
@@ -123,14 +130,27 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
       selectedStance: selStance || 'In Line',
       selectedFootwork: selFootwork || 'Front Foot',
       selectedIntent: selIntent || 'Stroke',
-      selectedZone: selZone || 'Cover'
+      selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
+      allowZoneClick: isBatter && batStep === 'zone'
     });
+  };
+
+  const scrollToDuelCanvas = () => {
+    const shell = document.getElementById('pvp-arcade-canvas')?.closest('.arcade-canvas-shell') || document.getElementById('pvp-arcade-canvas');
+    if (shell && typeof shell.scrollIntoView === 'function') {
+      shell.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const submitPlay = async () => {
     if (busy || duel.status !== 'active') return;
     const st = duel.state;
     const isBatter = st.batterId === state.player.discord_id;
+    const isLeave = selFootwork === 'Leave' || selIntent === 'Leave';
+    if (isBatter && !isLeave && batStep === 'zone' && !selZone) {
+      toast('Pick a direction (Wagon Zone or click field) first!', 'info');
+      return;
+    }
     busy = true;
     cricketAudio.ensureContext();
 
@@ -162,12 +182,13 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
 
       const res = await api('/api/challenge/play', { method: 'POST', body });
       duel = res.challenge;
-      batStep = 'stance'; selStance = null; selFootwork = null; selIntent = null; selZone = 'Cover';
+      batStep = 'stance'; selStance = null; selFootwork = null; selIntent = null; selZone = null;
       bowlStep = 'line'; selLine = null; selLength = null; selVar = null;
 
       syncCanvasConfig();
+      scrollToDuelCanvas();
       if (renderer && duel.state?.lastBall) {
-        renderer.playBallAnimation(duel.state.lastBall, { zone: usedZone });
+        renderer.playBallAnimation(duel.state.lastBall, { zone: duel.state.lastBall.actualZone || usedZone });
       }
       updatePanels();
 
@@ -186,8 +207,8 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     const st = duel.state || {};
     const myId = state.player.discord_id;
     const iWon = duel.winner_id === myId;
-    const winName = duel.winner_name || (duel.winner_id === 'ai_rival' ? 'AI Challenger Bot' : 'Winner');
-    const winTag = duel.winner_public_id && duel.winner_public_id !== 'AI' ? ` [${duel.winner_public_id}]` : '';
+    const winName = duel.winner_name || 'Winner';
+    const winTag = duel.winner_public_id ? ` [${duel.winner_public_id}]` : '';
 
     return `
       <div class="card ${iWon ? 'card-glow-emerald' : 'card-glow-crimson'}" style="text-align:center;padding:24px;margin-bottom:14px;">
@@ -199,7 +220,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
         <div class="grid-3" style="max-width:560px;margin:0 auto 14px;gap:10px;">
           <div class="card" style="padding:10px;"><div class="label">Score</div><div class="stat-big" style="font-size:1.3rem;">${st.runs || 0}/${st.wickets || 0}</div></div>
           <div class="card" style="padding:10px;"><div class="label">4s / 6s</div><div class="stat-big" style="font-size:1.3rem;color:var(--gold);">${st.fours || 0} / ${st.sixes || 0}</div></div>
-          <div class="card" style="padding:10px;"><div class="label">Rewards</div><div class="mono" style="font-size:0.85rem;color:var(--emerald);margin-top:6px;">${iWon ? '+50c • +5 Rep • +60 XP' : '+20 XP'}</div></div>
+          <div class="card" style="padding:10px;"><div class="label">Rewards</div><div class="mono ic-val" style="font-size:0.85rem;color:var(--emerald);margin-top:6px;justify-content:center;">${iWon ? `+25 ${caIcon('coin', 14)} • +5 Rep • +60 XP` : '+20 XP'}</div></div>
         </div>
         ${renderOutcomeBanner(st.lastBall)}
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:10px;">
@@ -247,7 +268,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
           <div class="step-crumb ${selStance ? 'done' : batStep === 'stance' ? 'active' : ''}" data-pvp-j="stance"><div class="label" style="margin:0;">1. Stance</div><div style="font-weight:700;font-size:0.8rem;">${esc(selStance || 'Pick')}</div></div>
           <div class="step-crumb ${selFootwork ? 'done' : batStep === 'footwork' ? 'active' : ''}" data-pvp-j="footwork"><div class="label" style="margin:0;">2. Footwork</div><div style="font-weight:700;font-size:0.8rem;">${esc(selFootwork || 'Pick')}</div></div>
           <div class="step-crumb ${selIntent ? 'done' : batStep === 'intent' ? 'active' : ''}" data-pvp-j="intent"><div class="label" style="margin:0;">3. Intent</div><div style="font-weight:700;font-size:0.8rem;">${isLeave ? 'Leave' : esc(selIntent || 'Pick')}</div></div>
-          <div class="step-crumb ${batStep === 'zone' ? 'active' : ''}"><div class="label" style="margin:0;">4. Zone &amp; Swing</div><div style="font-weight:700;font-size:0.8rem;">${isLeave ? 'Leave' : esc(batStep === 'zone' ? selZone : 'Locked')}</div></div>
+          <div class="step-crumb ${batStep === 'zone' ? 'active' : ''}"><div class="label" style="margin:0;">4. Zone &amp; Swing</div><div style="font-weight:700;font-size:0.8rem;">${isLeave ? 'Leave' : esc(batStep === 'zone' ? (selZone || 'Pick Zone') : 'Locked')}</div></div>
         </div>
 
         ${batStep === 'stance' ? `
@@ -290,7 +311,9 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
             ${timingMode === 'meter' ? `<div class="timing-bar" style="background:${barBg};"><div class="timing-needle" id="pvp-timing-needle"></div></div>` : '<div style="font-size:0.8rem;color:var(--text-muted);">Auto-Roll enabled</div>'}
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn btn-emerald btn-lg" id="btn-pvp-submit" style="flex:1;">🏏 SWING ➔ ${esc(selZone)} (SPACE)</button>
+            <button class="btn btn-emerald btn-lg" id="btn-pvp-submit" style="flex:1;" ${!selZone ? 'disabled' : ''}>
+              ${selZone ? `🏏 SWING ➔ ${esc(selZone)} (SPACE)` : '👆 Pick a Direction Above or on Field'}
+            </button>
             <button class="btn pvp-back-in">⬅️ Back</button>
           </div>
         ` : ''}
@@ -372,16 +395,46 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
 
     const outHost = document.getElementById('pvp-outcome-host');
     if (outHost) {
+      const isBatter = st.batterId === state.player.discord_id;
+      const ended = duel.status !== 'active';
+      const curDeliv = ended
+        ? (st.lastBall?.delivery || null)
+        : isBatter
+          ? (duel.currentBallPreview || null)
+          : { line: selLine || 'Stumps', length: selLength || 'Good Length', speed: selSpeed || 'Fast' };
+      const lengthOnly = !ended && isBatter && batStep !== 'zone' && Boolean(curDeliv);
       outHost.innerHTML = `
         ${renderOutcomeBanner(st.lastBall)}
         <div class="card" style="padding:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
             <h4 style="font-size:0.95rem;">🎯 Pitch Map</h4>
-            <span class="badge badge-muted">Last Ball</span>
+            <span class="badge ${ended ? 'badge-muted' : 'badge-cyan'}">${ended ? 'Final Ball' : 'Current Ball'}</span>
           </div>
-          ${renderHawkEyePitchSVG({ delivery: st.lastBall?.delivery || null, battingHand: duel.batterHand || 'Right-hand bat' })}
+          ${renderHawkEyePitchSVG({ delivery: curDeliv, lengthOnly, battingHand: duel.batterHand || 'Right-hand bat' })}
+          <div class="mono" style="font-size:0.74rem;color:var(--text-muted);text-align:center;margin-top:6px;">
+            ${!curDeliv ? 'Awaiting opponent delivery' : lengthOnly ? `Length Hint: ${esc(curDeliv.length)} • Line reveals at Step 4` : `${esc(curDeliv.length)} • ${esc(curDeliv.line)} (${esc(curDeliv.speed)})`}
+          </div>
         </div>
       `;
+    }
+
+    stopPoll();
+    const isBatterTurnWait = duel.status === 'active' && st.batterId === state.player.discord_id && !st.pendingDelivery;
+    const isBowlerTurnWait = duel.status === 'active' && st.bowlerId === state.player.discord_id && Boolean(st.pendingDelivery);
+    if (isBatterTurnWait || isBowlerTurnWait) {
+      pollTimer = setInterval(async () => {
+        try {
+          const hub = await api('/api/challenge/hub', { silent: true });
+          const upd = hub.challenges?.find(c => c.id === duel.id);
+          if (upd && (upd.status !== duel.status || Boolean(upd.state?.pendingDelivery) !== Boolean(duel.state?.pendingDelivery) || (upd.state?.balls || 0) !== (duel.state?.balls || 0))) {
+            stopPoll();
+            duel = upd;
+            if (duel.status !== 'active') showingFinalResult = true;
+            syncCanvasConfig();
+            updatePanels();
+          }
+        } catch {}
+      }, 3500);
     }
 
     const commHost = document.getElementById('pvp-comm-host');
@@ -407,9 +460,9 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     document.querySelectorAll('.step-crumb.done[data-pvp-j]').forEach(c => c.onclick = () => {
       const t = c.dataset.pvpJ;
       batStep = t;
-      if (t === 'stance') { selStance = null; selFootwork = null; selIntent = null; }
-      else if (t === 'footwork') { selFootwork = null; selIntent = null; }
-      else if (t === 'intent') { selIntent = null; }
+      if (t === 'stance') { selStance = null; selFootwork = null; selIntent = null; selZone = null; }
+      else if (t === 'footwork') { selFootwork = null; selIntent = null; selZone = null; }
+      else if (t === 'intent') { selIntent = null; selZone = null; }
       syncCanvasConfig(); updatePanels();
     });
     document.querySelectorAll('.step-crumb.done[data-pvp-bj]').forEach(c => c.onclick = () => {
@@ -425,9 +478,9 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     document.querySelectorAll('.pvp-fw-btn').forEach(b => b.onclick = () => { selFootwork = b.dataset.val; batStep = selFootwork === 'Leave' ? 'leave_confirm' : 'intent'; cricketAudio.playUiTick(); syncCanvasConfig(); updatePanels(); });
     document.querySelectorAll('.pvp-in-btn').forEach(b => b.onclick = () => { selIntent = b.dataset.val; batStep = selIntent === 'Leave' ? 'leave_confirm' : 'zone'; cricketAudio.playUiTick(); syncCanvasConfig(); updatePanels(); });
     document.querySelectorAll('.pvp-z-btn').forEach(b => b.onclick = () => { selZone = b.dataset.val; cricketAudio.playUiTick(); syncCanvasConfig(); updatePanels(); });
-    document.querySelectorAll('.pvp-back-st').forEach(b => b.onclick = () => { batStep = 'stance'; selStance = null; selFootwork = null; updatePanels(); });
-    document.querySelectorAll('.pvp-back-fw').forEach(b => b.onclick = () => { batStep = 'footwork'; selFootwork = null; selIntent = null; updatePanels(); });
-    document.querySelectorAll('.pvp-back-in').forEach(b => b.onclick = () => { batStep = 'intent'; selIntent = null; updatePanels(); });
+    document.querySelectorAll('.pvp-back-st').forEach(b => b.onclick = () => { batStep = 'stance'; selStance = null; selFootwork = null; selZone = null; syncCanvasConfig(); updatePanels(); });
+    document.querySelectorAll('.pvp-back-fw').forEach(b => b.onclick = () => { batStep = 'footwork'; selFootwork = null; selIntent = null; selZone = null; syncCanvasConfig(); updatePanels(); });
+    document.querySelectorAll('.pvp-back-in').forEach(b => b.onclick = () => { batStep = 'intent'; selIntent = null; selZone = null; syncCanvasConfig(); updatePanels(); });
 
     document.querySelectorAll('.pvp-bl-btn').forEach(b => b.onclick = () => { selLine = b.dataset.val; bowlStep = 'length'; cricketAudio.playUiTick(); updatePanels(); });
     document.querySelectorAll('.pvp-bln-btn').forEach(b => b.onclick = () => { selLength = b.dataset.val; bowlStep = 'variation'; cricketAudio.playUiTick(); updatePanels(); });
@@ -489,7 +542,12 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
   `;
 
   renderer = new CricketArcadeRenderer(document.getElementById('pvp-arcade-canvas'), {
-    onSelectZone: (z) => { selZone = z; if (batStep === 'zone') updatePanels(); },
+    onSelectZone: (z) => {
+      if (batStep !== 'zone') return;
+      selZone = z;
+      syncCanvasConfig();
+      updatePanels();
+    },
     onSelectBowlSpot: ({ line, length }) => { selLine = line; selLength = length; if (bowlStep === 'line' || bowlStep === 'length') bowlStep = 'variation'; updatePanels(); }
   });
   document.getElementById('btn-pvp-mute').onclick = () => {

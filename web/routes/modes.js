@@ -485,6 +485,11 @@ function enrichChallengeRow(database, row) {
     timingProfile,
     releaseCue: state.pendingDelivery ? buildInitialReleaseCue(state.pendingDelivery) : null,
     fullDeliveryReveal: state.pendingDelivery ? buildFullDeliveryReveal(state.pendingDelivery) : null,
+    currentBallPreview: state.pendingDelivery ? {
+      length: state.pendingDelivery.length,
+      line: state.pendingDelivery.line,
+      speed: state.pendingDelivery.speed
+    } : null,
     state
   };
 }
@@ -501,17 +506,20 @@ function enrichChallengeRow(database, row) {
     const rivals = db.prepare('SELECT discord_id, public_id, name, level, primary_role, nationality FROM players WHERE discord_id != ? AND level >= ? ORDER BY level DESC LIMIT 50').all(playerId, CHALLENGE_MIN_LEVEL);
     const challenges = db.prepare(`
       SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
-             COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
+             p2.name as opponent_name, p2.public_id as opponent_public_id
       FROM web_challenges c
-      LEFT JOIN players p1 ON c.challenger_id = p1.discord_id
-      LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
-      WHERE c.challenger_id = ? OR c.opponent_id = ?
+      JOIN players p1 ON c.challenger_id = p1.discord_id
+      JOIN players p2 ON c.opponent_id = p2.discord_id
+      WHERE (c.challenger_id = ? OR c.opponent_id = ?)
+        AND c.challenger_id != 'ai_rival'
+        AND c.opponent_id != 'ai_rival'
       ORDER BY c.updated_at DESC LIMIT 20
     `).all(playerId, playerId).map(c => enrichChallengeRow(db, c));
 
     const leaderboard = db.prepare(`
       SELECT p.discord_id, p.public_id, p.name, p.level, cs.won, cs.lost, cs.played, cs.runs, cs.wickets
       FROM challenge_stats cs JOIN players p ON cs.player_id = p.discord_id
+      WHERE cs.played > 0
       ORDER BY cs.won DESC, cs.runs DESC LIMIT 20
     `).all();
 
@@ -530,6 +538,7 @@ function enrichChallengeRow(database, row) {
       SELECT id, status, expires_at FROM web_challenges
       WHERE (challenger_id = ? OR (opponent_id = ? AND status = 'active'))
         AND status IN ('pending', 'active')
+        AND challenger_id != 'ai_rival' AND opponent_id != 'ai_rival'
     `).get(playerId, playerId);
     if (ownOngoing) {
       return sendJson(res, 409, {
@@ -538,36 +547,41 @@ function enrichChallengeRow(database, row) {
     }
 
     const body = await parseJsonBody(req);
-    let opponentId = String(body.opponent_id || 'ai_rival').trim();
+    let opponentId = String(body.opponent_id || '').trim();
     const targetRuns = Math.min(36, Math.max(6, Number(body.target_runs) || 15));
-    const isAi = opponentId === 'ai_rival';
-
-    if (!isAi) {
-      const opp = resolvePlayerByIdentifier(db, opponentId);
-      if (!opp) return sendJson(res, 404, { error: 'Opponent not found.' });
-      if ((opp.level || 1) < CHALLENGE_MIN_LEVEL) {
-        return sendJson(res, 403, { error: `${opp.name} hasn't unlocked Challenge Mode yet (requires Level ${CHALLENGE_MIN_LEVEL}).` });
-      }
-      opponentId = opp.discord_id;
-      if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
-
-      const oppBusy = db.prepare(`
-        SELECT id FROM web_challenges
-        WHERE (challenger_id = ? OR opponent_id = ?) AND status = 'active'
-      `).get(opponentId, opponentId);
-      if (oppBusy) {
-        return sendJson(res, 409, { error: 'That opponent is already in an active duel! Wait until their current challenge finishes.' });
-      }
+    if (!opponentId || opponentId === 'ai_rival') {
+      return sendJson(res, 400, { error: 'Challenge Mode is PvP only! Select a registered player to challenge.' });
     }
 
+    const opp = resolvePlayerByIdentifier(db, opponentId);
+    if (!opp) return sendJson(res, 404, { error: 'Opponent not found.' });
+    if ((opp.level || 1) < CHALLENGE_MIN_LEVEL) {
+      return sendJson(res, 403, { error: `${opp.name} hasn't unlocked Challenge Mode yet (requires Level ${CHALLENGE_MIN_LEVEL}).` });
+    }
+    opponentId = opp.discord_id;
+    if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
+
+    const oppBusy = db.prepare(`
+      SELECT id FROM web_challenges
+      WHERE (challenger_id = ? OR opponent_id = ?) AND status = 'active'
+        AND challenger_id != 'ai_rival' AND opponent_id != 'ai_rival'
+    `).get(opponentId, opponentId);
+    if (oppBusy) {
+      return sendJson(res, 409, { error: 'That opponent is already in an active duel! Wait until their current challenge finishes.' });
+    }
+
+    // Smart PvP role assignment: if one is a Bowler and one is a Batsman/Keeper, put Batsman vs Bowler naturally
+    const p1Bowl = String(player.primary_role || '').toLowerCase().includes('bowl') && !String(player.primary_role || '').toLowerCase().includes('all');
+    const p2Bowl = String(opp.primary_role || '').toLowerCase().includes('bowl') && !String(opp.primary_role || '').toLowerCase().includes('all');
+    const batterId = (p1Bowl && !p2Bowl) ? opponentId : playerId;
+    const bowlerId = batterId === playerId ? opponentId : playerId;
+
     const id = `duel_${crypto.randomBytes(5).toString('hex')}`;
-    const expiresAt = Date.now() + (isAi ? ACTIVE_CHALLENGE_TTL_MS : PENDING_CHALLENGE_TTL_MS);
-    const aiBowlerType = Math.random() < 0.45 ? 'spin' : 'pace';
+    const expiresAt = Date.now() + PENDING_CHALLENGE_TTL_MS;
     const state = {
       innings: 1,
-      batterId: playerId,
-      bowlerId: opponentId,
-      aiBowlerType,
+      batterId,
+      bowlerId,
       targetRuns,
       runs: 0,
       balls: 0,
@@ -575,15 +589,15 @@ function enrichChallengeRow(database, row) {
       fours: 0,
       sixes: 0,
       freeHit: false,
-      pendingDelivery: isAi ? generateBowlerDelivery('Flat Belter (Batting Paradise)', aiBowlerType) : null,
+      pendingDelivery: null,
       pendingShot: null,
-      log: [isAi ? `Match started (${aiBowlerType === 'spin' ? 'Spin' : 'Pace'} over)! Target: ${targetRuns} runs.` : `Challenge issued! Target: ${targetRuns} runs in 1 Over (6 balls).`]
+      log: [`PvP Challenge issued! Target: ${targetRuns} runs in 1 Over (6 balls).`]
     };
 
     db.prepare(`
       INSERT INTO web_challenges (id, challenger_id, opponent_id, target_runs, status, state_json, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, playerId, opponentId, targetRuns, isAi ? 'active' : 'pending', JSON.stringify(state), expiresAt);
+      VALUES (?, ?, ?, ?, 'pending', ?, ?)
+    `).run(id, playerId, opponentId, targetRuns, JSON.stringify(state), expiresAt);
 
     recordSystemLog({
       level: 'INFO',
@@ -591,10 +605,10 @@ function enrichChallengeRow(database, row) {
       actor: user.username,
       target: opponentId,
       title: `Created PvP Duel (${id})`,
-      details: { targetRuns, isAi, expiresAt },
+      details: { targetRuns, expiresAt },
       ip
     });
-    return sendJson(res, 201, { id, status: isAi ? 'active' : 'pending', expires_at: expiresAt, state });
+    return sendJson(res, 201, { id, status: 'pending', expires_at: expiresAt, state });
   }
 
   if (pathname === '/api/challenge/cancel' && req.method === 'POST') {
@@ -762,7 +776,8 @@ function enrichChallengeRow(database, row) {
         rebowl: Boolean(sim.rebowl),
         timing: sim.timing,
         shotName,
-        zone: isLeave ? 'In Line' : zone,
+        zone: isLeave ? 'In Line' : (sim.actualZone || zone),
+        actualZone: isLeave ? 'In Line' : (sim.actualZone || zone),
         commentary: sim.commentary,
         delivery: { ...deliv }
       };

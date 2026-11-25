@@ -17,7 +17,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
   let selStance = null;
   let selFootwork = null;
   let selIntent = null;
-  let selZone = 'Cover';
+  let selZone = null;
 
   let bowlStep = 'line'; // 'line' -> 'length' -> 'variation' -> 'field'
   let selLine = null;
@@ -72,7 +72,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     selStance = null;
     selFootwork = null;
     selIntent = null;
-    selZone = 'Cover';
+    selZone = null;
   };
 
   const resetBowlSteps = () => {
@@ -164,12 +164,25 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       selectedStance: selStance || 'In Line',
       selectedFootwork: selFootwork || 'Front Foot',
       selectedIntent: selIntent || 'Stroke',
-      selectedZone: selZone || 'Cover'
+      selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
+      allowZoneClick: batStep === 'zone'
     });
+  };
+
+  const scrollToStadiumCanvas = () => {
+    const shell = document.getElementById('cricket-arcade-canvas')?.closest('.arcade-canvas-shell') || document.getElementById('cricket-arcade-canvas');
+    if (shell && typeof shell.scrollIntoView === 'function') {
+      shell.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const submitDelivery = async () => {
     if (busy || !match || match.finished) return;
+    const isLeave = selFootwork === 'Leave' || selIntent === 'Leave';
+    if (match.phase === 'batting' && !isLeave && batStep === 'zone' && !selZone) {
+      toast('Pick a direction (Wagon Zone or click field) first!', 'info');
+      return;
+    }
     busy = true;
     cricketAudio.ensureContext();
 
@@ -194,7 +207,10 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
         resetBatSteps();
         resetBowlSteps();
         syncCanvasConfig();
-        if (renderer && match.lastBall) renderer.playBallAnimation(match.lastBall, { zone: usedZone });
+        scrollToStadiumCanvas();
+        if (renderer && match.lastBall) {
+          renderer.playBallAnimation(match.lastBall, { zone: match.lastBall.actualZone || usedZone });
+        }
         updateArenaPanels();
         await onMatchUpdate(match);
 
@@ -224,6 +240,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
         match = res.match;
         resetBowlSteps();
         syncCanvasConfig();
+        scrollToStadiumCanvas();
         if (renderer && match.lastBall) renderer.playBallAnimation(match.lastBall, {});
         updateArenaPanels();
         await onMatchUpdate(match);
@@ -346,7 +363,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
           </div>
           <div class="step-crumb ${batStep === 'zone' ? 'active' : ''}">
             <div class="label" style="margin:0;">4. Zone &amp; Swing</div>
-            <div style="font-weight:700;font-size:0.82rem;">${isLeave ? 'Leave' : esc(batStep === 'zone' ? selZone : 'Locked')}</div>
+            <div style="font-weight:700;font-size:0.82rem;">${isLeave ? 'Leave' : esc(batStep === 'zone' ? (selZone || 'Pick Zone') : 'Locked')}</div>
           </div>
         </div>
 
@@ -437,7 +454,9 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
           </div>
 
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn btn-emerald btn-lg" id="btn-arcade-deliver" style="flex:1;">🏏 SWING SHOT ➔ ${esc(selZone)} (SPACE)</button>
+            <button class="btn btn-emerald btn-lg" id="btn-arcade-deliver" style="flex:1;" ${!selZone ? 'disabled' : ''}>
+              ${selZone ? `🏏 SWING SHOT ➔ ${esc(selZone)} (SPACE)` : '👆 Pick a Direction Above or on Field'}
+            </button>
             <button class="btn bat-back-intent">⬅️ Back</button>
           </div>
         ` : ''}
@@ -547,9 +566,9 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     document.querySelectorAll('.step-crumb.done[data-jump]').forEach(c => c.onclick = () => {
       const t = c.dataset.jump;
       batStep = t;
-      if (t === 'stance') { selStance = null; selFootwork = null; selIntent = null; }
-      else if (t === 'footwork') { selFootwork = null; selIntent = null; }
-      else if (t === 'intent') { selIntent = null; }
+      if (t === 'stance') { selStance = null; selFootwork = null; selIntent = null; selZone = null; }
+      else if (t === 'footwork') { selFootwork = null; selIntent = null; selZone = null; }
+      else if (t === 'intent') { selIntent = null; selZone = null; }
       syncCanvasConfig();
       updateControlsOnly();
     });
@@ -584,7 +603,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       cricketAudio.playUiTick(); syncCanvasConfig(); updateControlsOnly();
     });
     document.querySelectorAll('.bat-back-intent').forEach(b => b.onclick = () => {
-      batStep = 'intent'; selIntent = null; syncCanvasConfig(); updateControlsOnly();
+      batStep = 'intent'; selIntent = null; selZone = null; syncCanvasConfig(); updateControlsOnly();
     });
     document.querySelectorAll('.bat-zone-btn').forEach(b => b.onclick = () => {
       selZone = b.dataset.val; cricketAudio.playUiTick(); syncCanvasConfig(); updateControlsOnly();
@@ -639,11 +658,44 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     });
   };
 
+  const renderPitchMapHTML = () => {
+    const isBat = match.phase === 'batting';
+    const curDeliv = match.finished
+      ? (match.lastBall?.delivery || null)
+      : isBat
+        ? (match.currentBallPreview || null)
+        : { line: selLine || 'Stumps', length: selLength || 'Good Length', speed: selSpeed || 'Fast' };
+    const lengthOnly = !match.finished && isBat && batStep !== 'zone';
+    const caption = !curDeliv
+      ? 'Awaiting delivery'
+      : lengthOnly
+        ? `Length Hint: ${esc(curDeliv.length)} • Line reveals at Step 4`
+        : `${esc(curDeliv.length)} • ${esc(curDeliv.line)} (${esc(curDeliv.speed)})`;
+    return `
+      <div class="card" style="padding:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <h4 style="font-size:0.95rem;">🎯 Pitch Map</h4>
+          <span class="badge ${match.finished ? 'badge-muted' : 'badge-cyan'}">${match.finished ? 'Final Ball' : 'Current Ball'}</span>
+        </div>
+        ${renderHawkEyePitchSVG({
+          delivery: curDeliv,
+          lengthOnly,
+          battingHand: isBat ? match.battingHand : match.oppBatterHand
+        })}
+        <div class="mono" style="font-size:0.74rem;color:var(--text-muted);text-align:center;margin-top:6px;">
+          ${caption}
+        </div>
+      </div>
+    `;
+  };
+
   const updateControlsOnly = () => {
     const ctrlHost = document.getElementById('arcade-controls-host');
     if (!ctrlHost || !match) return;
     ctrlHost.innerHTML = renderControlsHTML();
     bindControlsEvents();
+    const pmHost = document.getElementById('arcade-pitch-map-host');
+    if (pmHost) pmHost.innerHTML = renderPitchMapHTML();
   };
 
   const updateArenaPanels = () => {
@@ -654,21 +706,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     if (outHost) {
       outHost.innerHTML = `
         ${renderOutcomeBanner(match.lastBall)}
-        <div class="card" style="padding:14px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <h4 style="font-size:0.95rem;">🎯 Pitch Map</h4>
-            <span class="badge badge-muted">Last Ball</span>
-          </div>
-          ${renderHawkEyePitchSVG({
-            delivery: match.lastBall?.delivery || null,
-            battingHand: match.phase === 'batting' ? match.battingHand : match.oppBatterHand
-          })}
-          <div class="mono" style="font-size:0.74rem;color:var(--text-muted);text-align:center;margin-top:6px;">
-            ${match.lastBall?.delivery
-              ? `${esc(match.lastBall.delivery.length)} • ${esc(match.lastBall.delivery.line)} (${esc(match.lastBall.delivery.speed)})`
-              : 'Awaiting delivery'}
-          </div>
-        </div>
+        <div id="arcade-pitch-map-host">${renderPitchMapHTML()}</div>
       `;
     }
 
@@ -862,8 +900,10 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       const canvasEl = document.getElementById('cricket-arcade-canvas');
       renderer = new CricketArcadeRenderer(canvasEl, {
         onSelectZone: (zone) => {
+          if (batStep !== 'zone') return;
           selZone = zone;
-          if (batStep === 'zone') updateControlsOnly();
+          syncCanvasConfig();
+          updateControlsOnly();
         },
         onSelectBowlSpot: ({ line, length }) => {
           selLine = line;

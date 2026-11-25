@@ -59,7 +59,7 @@ export function renderGearIconSVG(type, rarity = 'Common', equipped = false) {
 /**
  * Hawk-Eye Style Pitch Strip Diagram showing last delivery bounce spot (Length x Line)
  */
-export function renderHawkEyePitchSVG({ delivery = null, battingHand = 'Right-hand bat' } = {}) {
+export function renderHawkEyePitchSVG({ delivery = null, lengthOnly = false, battingHand = 'Right-hand bat' } = {}) {
   const isLeft = String(battingHand || '').toLowerCase().includes('left');
   const line = delivery?.line || null;
   const len = delivery?.length || null;
@@ -72,10 +72,12 @@ export function renderHawkEyePitchSVG({ delivery = null, battingHand = 'Right-ha
 
   // Map Length to Y (bowler top ~22 -> batter crease bottom ~158)
   let by = 96;
-  if (len === 'Yorker') by = 148;
-  else if (len === 'Full' || len === 'Full Toss') by = 126;
-  else if (len === 'Good Length') by = 92;
-  else if (len === 'Short') by = 58;
+  let bandY = 76;
+  let bandH = 36;
+  if (len === 'Yorker') { by = 148; bandY = 140; bandH = 18; }
+  else if (len === 'Full' || len === 'Full Toss') { by = 126; bandY = 112; bandH = 28; }
+  else if (len === 'Good Length') { by = 92; bandY = 76; bandH = 36; }
+  else if (len === 'Short') { by = 58; bandY = 42; bandH = 34; }
 
   return `
     <svg viewBox="0 0 220 185" style="width:100%;max-width:230px;display:block;margin:0 auto;">
@@ -107,7 +109,11 @@ export function renderHawkEyePitchSVG({ delivery = null, battingHand = 'Right-ha
       <line x1="104" y1="22" x2="104" y2="158" stroke="rgba(255,255,255,0.22)" stroke-dasharray="3 3" />
       <line x1="116" y1="22" x2="116" y2="158" stroke="rgba(255,255,255,0.22)" stroke-dasharray="3 3" />
 
-      ${delivery ? `
+      ${delivery && lengthOnly ? `
+        <!-- Initial Release Hint: Length Band Highlight Only -->
+        <rect x="66" y="${bandY}" width="88" height="${bandH}" fill="rgba(251,191,36,0.34)" stroke="#fbbf24" stroke-width="1.8" stroke-dasharray="4 2" />
+        <text x="110" y="${by + 3}" fill="#0f172a" font-size="8" font-weight="800" font-family="JetBrains Mono" text-anchor="middle">${(len || '').toUpperCase()}</text>
+      ` : delivery ? `
         <!-- Trajectory & Bounce Marker -->
         <line x1="110" y1="24" x2="${bx}" y2="${by}" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4 3" />
         <line x1="${bx}" y1="${by}" x2="${bx}" y2="164" stroke="#fbbf24" stroke-width="2" />
