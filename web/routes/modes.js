@@ -555,10 +555,12 @@ function enrichChallengeRow(database, row) {
 
     const id = `duel_${crypto.randomBytes(5).toString('hex')}`;
     const expiresAt = Date.now() + (isAi ? ACTIVE_CHALLENGE_TTL_MS : PENDING_CHALLENGE_TTL_MS);
+    const aiBowlerType = Math.random() < 0.45 ? 'spin' : 'pace';
     const state = {
       innings: 1,
       batterId: playerId,
       bowlerId: opponentId,
+      aiBowlerType,
       targetRuns,
       runs: 0,
       balls: 0,
@@ -566,9 +568,9 @@ function enrichChallengeRow(database, row) {
       fours: 0,
       sixes: 0,
       freeHit: false,
-      pendingDelivery: isAi ? generateBowlerDelivery('Flat Belter (Batting Paradise)') : null,
+      pendingDelivery: isAi ? generateBowlerDelivery('Flat Belter (Batting Paradise)', aiBowlerType) : null,
       pendingShot: null,
-      log: [isAi ? `AI Rival accepted a 1-Over (6-Ball) Showdown! Target: ${targetRuns} runs.` : `Challenge issued! Target: ${targetRuns} runs in 1 Over (6 balls).`]
+      log: [isAi ? `Match started (${aiBowlerType === 'spin' ? 'Spin' : 'Pace'} over)! Target: ${targetRuns} runs.` : `Challenge issued! Target: ${targetRuns} runs in 1 Over (6 balls).`]
     };
 
     db.prepare(`
@@ -759,7 +761,7 @@ function enrichChallengeRow(database, row) {
       if (state.recentBalls.length > 6) state.recentBalls = state.recentBalls.slice(-6);
 
       state.log.unshift(`Ball ${state.balls}: ${deliv.length} ${deliv.line} ➔ ${shotName} [${sim.timing}] — ${sim.commentary}`);
-      state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)') : null;
+      state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)', state.aiBowlerType || 'pace') : null;
 
       const batterWon = state.runs >= state.targetRuns;
       const bowlerWon = state.wickets >= 1 || (state.balls >= 6 && state.runs < state.targetRuns);

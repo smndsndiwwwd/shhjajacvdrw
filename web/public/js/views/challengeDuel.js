@@ -376,7 +376,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
         ${renderOutcomeBanner(st.lastBall)}
         <div class="card" style="padding:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <h4 style="font-size:0.95rem;">🎯 Hawk-Eye Pitch Tracker</h4>
+            <h4 style="font-size:0.95rem;">🎯 Pitch Map</h4>
             <span class="badge badge-muted">Last Ball</span>
           </div>
           ${renderHawkEyePitchSVG({ delivery: st.lastBall?.delivery || null, battingHand: duel.batterHand || 'Right-hand bat' })}
@@ -473,7 +473,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     <div class="match-layout arcade-grid">
       <div class="card card-glow-emerald" style="padding:12px;">
         <div class="arcade-canvas-toolbar">
-          <span class="badge badge-emerald">🎮 3D PVP DUEL ARENA • 60 FPS</span>
+          <span class="badge badge-emerald">⚔️ LIVE DUEL</span>
           <button class="btn btn-sm" id="btn-pvp-mute">${cricketAudio.muted ? '🔇 Audio OFF' : '🔊 Audio ON'}</button>
         </div>
         <div class="arcade-canvas-shell">

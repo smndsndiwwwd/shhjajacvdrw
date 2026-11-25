@@ -450,10 +450,21 @@ export class CricketArcadeRenderer {
     if (this.flashAlpha > 0) this.flashAlpha = Math.max(0, this.flashAlpha - dt * 1.9);
     if (this.crowdExcitement > 0) this.crowdExcitement = Math.max(0, this.crowdExcitement - dt * 0.4);
 
-    // Smoothly return camera focus toward center when idle
-    if (!this.anim || this.anim.stage !== 'outcome') {
+    // Smoothly jog fielders back to base fielding spots when ball isn't active
+    if (!this.anim) {
       this.camFocus.x += (0 - this.camFocus.x) * Math.min(1, dt * 4);
       this.camFocus.y += (0 - this.camFocus.y) * Math.min(1, dt * 4);
+      const JOG_SPEED = 165;
+      for (const f of this.fielders) {
+        const dx = f.baseX - f.wx;
+        const dy = f.baseY - f.wy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0.5) {
+          const step = Math.min(dist, JOG_SPEED * dt);
+          f.wx += (dx / dist) * step;
+          f.wy += (dy / dist) * step;
+        }
+      }
     }
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -593,20 +604,29 @@ export class CricketArcadeRenderer {
         });
         if (this.trail.length > 26) this.trail.shift();
 
-        // Nearest fielder chases toward intercept point (clamped inside boundary!)
-        let nearest = null;
-        let bestD = Infinity;
-        for (const f of this.fielders) {
-          const d = Math.hypot(f.baseX - a.endWx, f.baseY - a.endWy);
-          if (d < bestD) { bestD = d; nearest = f; }
-        }
-        if (nearest) {
-          const mag = Math.hypot(a.endWx, a.endWy) || 1;
-          const capDist = Math.min(mag, R_BOUNDARY - 16);
-          const tx = (a.endWx / mag) * capDist;
-          const ty = (a.endWy / mag) * capDist;
-          nearest.wx += (tx - nearest.wx) * Math.min(1, dt * 4.5);
-          nearest.wy += (ty - nearest.wy) * Math.min(1, dt * 4.5);
+        // Realistic sprint toward ball intercept after shot leaves the bat (zero teleporting!)
+        if (a.t > 0.08) {
+          let nearest = null;
+          let bestD = Infinity;
+          for (const f of this.fielders) {
+            const d = Math.hypot(f.baseX - a.endWx, f.baseY - a.endWy);
+            if (d < bestD) { bestD = d; nearest = f; }
+          }
+          if (nearest) {
+            const mag = Math.hypot(a.endWx, a.endWy) || 1;
+            const capDist = Math.min(mag, R_BOUNDARY - 16);
+            const tx = (a.endWx / mag) * capDist;
+            const ty = (a.endWy / mag) * capDist;
+            const dx = tx - nearest.wx;
+            const dy = ty - nearest.wy;
+            const dist = Math.hypot(dx, dy);
+            const SPRINT_SPEED = 195;
+            if (dist > 1) {
+              const step = Math.min(dist, SPRINT_SPEED * dt);
+              nearest.wx += (dx / dist) * step;
+              nearest.wy += (dy / dist) * step;
+            }
+          }
         }
       } else {
         a.ball.wx = 0;
@@ -616,7 +636,6 @@ export class CricketArcadeRenderer {
 
       if (p >= 1) {
         this.anim = null;
-        this.syncFielders();
       }
     }
   }

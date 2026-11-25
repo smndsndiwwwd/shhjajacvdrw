@@ -13,7 +13,7 @@ export function renderAuthView(container, onAuthenticated) {
                 <div class="brand-logo" style="width:58px;height:58px;"><img src="/bot-logo.png" alt="Cricket Ascend Logo" class="brand-logo-img" /></div>
                 <div>
                   <div class="brand-title" style="font-size:1.5rem;">CRICKET ASCEND</div>
-                  <div class="brand-sub">Floodlit Career RPG &amp; Broadcast Platform</div>
+                  <div class="brand-sub">Career Cricket RPG</div>
                 </div>
               </div>
               <h1 style="font-size:2.15rem;line-height:1.15;margin-bottom:14px;">
@@ -30,8 +30,8 @@ export function renderAuthView(container, onAuthenticated) {
                 <div style="font-size:0.82rem;color:var(--text-muted);">Academy, Club, District, State, T20 &amp; International tiers</div>
               </div>
               <div class="card" style="padding:14px;">
-                <div class="badge badge-cyan" style="margin-bottom:6px;">2D Radar Engine</div>
-                <div style="font-size:0.82rem;color:var(--text-muted);">Interactive step-by-step batting, bowling &amp; live timing meter</div>
+                <div class="badge badge-cyan" style="margin-bottom:6px;">Live Matchplay</div>
+                <div style="font-size:0.82rem;color:var(--text-muted);">Step-by-step batting, bowling &amp; interactive timing meter</div>
               </div>
               <div class="card" style="padding:14px;">
                 <div class="badge badge-gold" style="margin-bottom:6px;">Franchise Auctions</div>

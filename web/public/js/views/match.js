@@ -117,7 +117,6 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
           <strong style="color:var(--emerald);">🏏 Equipped Shot: ${esc(shot.num)} ${esc(shot.name)}</strong>
           <span class="badge badge-cyan">${esc(shot.style)}</span>
         </div>
-        <div style="color:var(--text-muted);font-size:0.78rem;margin-top:3px;">${esc(shot.desc)}</div>
       </div>
     `;
   };
@@ -656,7 +655,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
         ${renderOutcomeBanner(match.lastBall)}
         <div class="card" style="padding:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <h4 style="font-size:0.95rem;">🎯 Hawk-Eye Pitch Tracker</h4>
+            <h4 style="font-size:0.95rem;">🎯 Pitch Map</h4>
             <span class="badge badge-muted">Last Ball</span>
           </div>
           ${renderHawkEyePitchSVG({
@@ -837,8 +836,8 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
               <div class="card card-glow-emerald" style="padding:12px;">
                 <div class="arcade-canvas-toolbar">
                   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span class="badge badge-emerald">🎮 3D STADIUM ARENA • 60 FPS</span>
-                    <span class="mono arcade-key-hint" style="font-size:0.72rem;color:var(--text-muted);">Step 4 Aim: Click Field / ◄ ► • Space: Swing • M: Mute</span>
+                    <span class="badge badge-emerald">🏟️ LIVE MATCH</span>
+                    <span class="mono arcade-key-hint" style="font-size:0.72rem;color:var(--text-muted);">Click field to aim • Space: Play • M: Mute</span>
                   </div>
                   <button class="btn btn-sm" id="btn-arcade-mute">${cricketAudio.muted ? '🔇 Audio OFF' : '🔊 Audio ON'}</button>
                 </div>

@@ -1,7 +1,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, AttachmentBuilder } from 'discord.js';
 import db from '../database/db.js';
 import { chapters, getPlayerChapters } from '../game/chapters.js';
-import { deliveries, shots, simulateBall, simulateBallAdvanced, getReleaseHint, getDerivedShotName, generateBowlerDelivery } from '../game/engine.js';
+import { deliveries, shots, simulateBall, simulateBallAdvanced, getReleaseHint, getDerivedShotName, generateBowlerDelivery, pickBowlerTypeForOver } from '../game/engine.js';
 import { getPlayerEquippedShot } from '../game/shotmap.js';
 import { addXP, updateAndGetEnergy, consumeEnergy, getEffectiveAttributes, getEquipmentBonuses } from '../game/utils.js';
 import { getRandomEvent, getPlayerEvent } from '../game/events.js';
@@ -700,8 +700,16 @@ async function runBattingMatch(interaction, player, match, chapterMode) {
   let selectedZone = null;
   let currentStep = 'stance';
 
+  // Lock bowler type per 6-ball over so a bowler never switches between pace and spin mid-over
+  const overBowlerTypes = {};
+  const getOverCraft = (ballCount) => {
+    const ov = Math.floor((ballCount || 0) / 6);
+    if (!overBowlerTypes[ov]) overBowlerTypes[ov] = pickBowlerTypeForOver(match.pitch, ov);
+    return overBowlerTypes[ov];
+  };
+
   // Pre-generate the first delivery
-  const initialDelivery = generateBowlerDelivery(match.pitch);
+  const initialDelivery = generateBowlerDelivery(match.pitch, getOverCraft(0));
   let nextLine = initialDelivery.line;
   let nextLength = initialDelivery.length;
   let nextVariation = initialDelivery.variation;
@@ -1048,8 +1056,8 @@ async function runBattingMatch(interaction, player, match, chapterMode) {
           selectedZone = null;
           currentStep = 'stance';
 
-          // Pre-generate next bowler delivery
-          const nextDeliv = generateBowlerDelivery(match.pitch);
+          // Pre-generate next bowler delivery (locked by current over bowler)
+          const nextDeliv = generateBowlerDelivery(match.pitch, getOverCraft(ballsFaced));
           nextLine = nextDeliv.line;
           nextLength = nextDeliv.length;
           nextVariation = nextDeliv.variation;
@@ -1405,8 +1413,16 @@ async function runAllRounderMatch(interaction, player, match, chapterMode) {
   let selectedZone = null;
   let currentStep = 'stance';
 
+  // Lock bowler type per 6-ball over so a bowler never switches between pace and spin mid-over
+  const overBowlerTypes = {};
+  const getOverCraft = (ballCount) => {
+    const ov = Math.floor((ballCount || 0) / 6);
+    if (!overBowlerTypes[ov]) overBowlerTypes[ov] = pickBowlerTypeForOver(match.pitch, ov);
+    return overBowlerTypes[ov];
+  };
+
   // Pre-generate the first delivery
-  const initialDelivery = generateBowlerDelivery(match.pitch);
+  const initialDelivery = generateBowlerDelivery(match.pitch, getOverCraft(0));
   let nextLine = initialDelivery.line;
   let nextLength = initialDelivery.length;
   let nextVariation = initialDelivery.variation;
@@ -1748,8 +1764,8 @@ async function runAllRounderMatch(interaction, player, match, chapterMode) {
           selectedZone = null;
           currentStep = 'stance';
 
-          // Pre-generate next bowler delivery
-          const nextDeliv = generateBowlerDelivery(match.pitch);
+          // Pre-generate next bowler delivery (locked by current over bowler)
+          const nextDeliv = generateBowlerDelivery(match.pitch, getOverCraft(ballsFaced));
           nextLine = nextDeliv.line;
           nextLength = nextDeliv.length;
           nextVariation = nextDeliv.variation;

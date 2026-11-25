@@ -1,6 +1,7 @@
 import db from '../../src/database/db.js';
 import {
   generateBowlerDelivery,
+  pickBowlerTypeForOver,
   getReleaseHint,
   getPlayerBattingPosition,
   getDerivedShotName,
@@ -189,29 +190,48 @@ export function clearActiveWebMatch(playerId) {
 export function buildInitialReleaseCue(d) {
   if (!d) return '👀 *Bowler walks back to the mark...*';
   const spd = d.speed === 'Fast'
-    ? 'steams in rapidly from the boundary'
+    ? 'steaming in at pace'
     : d.speed === 'Slow'
-      ? 'trots in with a slow, loopy rhythm'
-      : 'glides in with a measured run-up';
+      ? 'flighting the ball calmly'
+      : 'running in smoothly';
   const v = String(d.variation || '').toLowerCase();
   let gripHint = '';
-  if (v.includes('googly') || v.includes('doosra') || v.includes('mystery')) gripHint = ' — wrist snaps subtly behind the hand';
-  else if (v.includes('swing') || v.includes('seam')) gripHint = ' — shiny side polished, upright seam visible';
-  else if (v.includes('cutter') || v.includes('slower') || v.includes('knuckle')) gripHint = ' — fingers roll carefully across the leather';
-  else if (v.includes('spin') || v.includes('leg-break') || v.includes('off-break')) gripHint = ' — giving the ball extra air & revs';
-  return `👀 **Initial Release Hint:** The bowler ${spd}${gripHint}. *Commit your Stance, Footwork & Intent before reading the pitch!*`;
+  if (v.includes('googly') || v.includes('doosra') || v.includes('mystery')) gripHint = ' with subtle wrist action';
+  else if (v.includes('swing') || v.includes('seam')) gripHint = ' with upright seam';
+  else if (v.includes('cutter') || v.includes('slower') || v.includes('knuckle')) gripHint = ' rolling fingers on the ball';
+  else if (v.includes('spin') || v.includes('leg-break') || v.includes('off-break')) gripHint = ' with sharp finger spin';
+  return `👀 **Delivery Hint:** **${d.length}** length, ${spd}${gripHint}. *Full line & variation reveal before your swing.*`;
 }
 
 export function buildFullDeliveryReveal(d) {
   if (!d) return '';
-  return `🥎 **Full Delivery Read:** **${d.speed} ${d.variation}** pitched **${d.length}** on **${d.line}**!`;
+  return `🥎 **Incoming Delivery:** **${d.speed} ${d.variation}** pitched **${d.length}** on **${d.line}**!`;
+}
+
+function getLockedOverBowlerType(match, overIndex) {
+  if (!match.overBowlerTypes) match.overBowlerTypes = {};
+  if (!match.overBowlerTypes[overIndex]) {
+    if (overIndex > 0) {
+      // Alternate naturally with a fresh bowler for the next over
+      const prev = match.overBowlerTypes[overIndex - 1];
+      const next = pickBowlerTypeForOver(match.pitch, overIndex);
+      match.overBowlerTypes[overIndex] = prev === next && Math.random() < 0.65 ? (prev === 'spin' ? 'pace' : 'spin') : next;
+    } else {
+      match.overBowlerTypes[overIndex] = pickBowlerTypeForOver(match.pitch, 0);
+    }
+  }
+  return match.overBowlerTypes[overIndex];
 }
 
 function prepareNextDelivery(match) {
   if (match.phase !== 'batting') return;
-  const bowlerType = match.attack ? match.attack.getCurrentBowler()?.type : null;
+  const overIdx = Math.floor((match.bat?.balls || 0) / 6);
+  const bowlerType = match.attack
+    ? (match.attack.getCurrentBowler()?.type || 'pace')
+    : getLockedOverBowlerType(match, overIdx);
   const d = generateBowlerDelivery(match.pitch, bowlerType);
   match.nextDelivery = d;
+  match.currentBowlerType = bowlerType;
   match.releaseHint = getReleaseHint(d.line, d.length, d.speed, d.variation);
   match.releaseCue = buildInitialReleaseCue(d);
   match.fullDeliveryReveal = buildFullDeliveryReveal(d);
@@ -223,10 +243,12 @@ function serializeMatchState(match) {
   const ppOvers = match.totalOvers >= 15 ? 6 : match.totalOvers >= 5 ? 2 : 1;
   const completedOvers = match.attack ? match.attack.completedOvers : Math.floor(ballsUsed / 6);
   const isPowerplay = completedOvers < ppOvers;
+  const overIdx = Math.floor(ballsUsed / 6);
+  const curType = match.currentBowlerType || (match.isSpinOpponent ? 'spin' : 'pace');
   const curBowler = match.attack ? match.attack.getCurrentBowler() : {
-    name: match.opponent,
-    style: match.isSpinOpponent ? 'Spin Specialist' : 'Pace Attack',
-    oversBowled: Math.floor(ballsUsed / 6),
+    name: `${match.opponent} (${overIdx + 1})`,
+    style: curType === 'spin' ? 'Spin Bowler' : 'Pace Bowler',
+    oversBowled: overIdx,
     ballsBowled: ballsUsed,
     runsConceded: match.teamRuns || match.bat.runs,
     wicketsTaken: match.bat.wickets || 0

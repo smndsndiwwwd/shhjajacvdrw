@@ -595,7 +595,7 @@ const DELIVERY_TACTICS = {
   'Skidding Flipper': {
     lines: { 'Stumps': 55, 'Leg Side': 25, 'Off Side': 18, 'Wide': 2 },
     lengths: { 'Good Length': 50, 'Yorker': 30, 'Full': 20 },
-    speeds: { 'Medium': 65, 'Slow': 20, 'Fast': 15 }
+    speeds: { 'Medium': 55, 'Slow': 45 }
   },
   'Arm Ball': {
     lines: { 'Leg Side': 42, 'Stumps': 38, 'Off Side': 18, 'Wide': 2 },
@@ -609,6 +609,16 @@ const DELIVERY_TACTICS = {
   }
 };
 
+export function pickBowlerTypeForOver(pitch = 'Balanced Sporting Pitch', overIndex = 0) {
+  const pLower = (pitch || '').toLowerCase();
+  let spinBias = 0.42;
+  if (pLower.includes('spin') || pLower.includes('dust') || pLower.includes('dry') || pLower.includes('crumbly')) spinBias = 0.68;
+  else if (pLower.includes('green') || pLower.includes('seam') || pLower.includes('swing') || pLower.includes('bounc') || pLower.includes('clay')) spinBias = 0.25;
+  // Opening over favors pace unless spin pitch, alternating cleanly across overs
+  if (overIndex === 0 && spinBias < 0.6) return Math.random() < spinBias * 0.6 ? 'spin' : 'pace';
+  return Math.random() < spinBias ? 'spin' : 'pace';
+}
+
 export function generateBowlerDelivery(pitch = 'Balanced Sporting Pitch', bowlerType = null) {
   const pLower = (pitch || '').toLowerCase();
 
@@ -617,13 +627,7 @@ export function generateBowlerDelivery(pitch = 'Balanced Sporting Pitch', bowler
   if (bowlerType) {
     isSpin = bowlerType.toLowerCase().includes('spin');
   } else {
-    if (pLower.includes('spin') || pLower.includes('dust') || pLower.includes('dry') || pLower.includes('crumbly')) {
-      isSpin = Math.random() < 0.65;
-    } else if (pLower.includes('green') || pLower.includes('seam') || pLower.includes('swing') || pLower.includes('bounc') || pLower.includes('clay')) {
-      isSpin = Math.random() < 0.25;
-    } else {
-      isSpin = Math.random() < 0.50;
-    }
+    isSpin = pickBowlerTypeForOver(pitch, 0) === 'spin';
   }
 
   // 2. Select tactical variation based on craft & pitch conditions
@@ -681,7 +685,7 @@ export function generateBowlerDelivery(pitch = 'Balanced Sporting Pitch', bowler
 
   const fieldPreset = ['Balanced', 'Attacking', 'Defensive'][Math.floor(Math.random() * 3)];
 
-  return { line, length, variation, speed, fieldPreset };
+  return { line, length, variation, speed, fieldPreset, bowlerType: isSpin ? 'spin' : 'pace' };
 }
 
 export function getOverBowler(pitch = 'Balanced Sporting Pitch', overNumber = 1, previousBowler = null) {

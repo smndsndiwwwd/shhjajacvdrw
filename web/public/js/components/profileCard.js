@@ -74,11 +74,11 @@ function drawProfileToCanvas(canvas, data, logoImg = null, avatarImg = null) {
   ctx.fillStyle = '#fbbf24';
   ctx.font = 'bold 12px "Chakra Petch", sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('CRICKET ASCEND OFFICIAL PLAYER CARD', 40, 40);
+  ctx.fillText('CRICKET ASCEND • PLAYER PROFILE', 40, 40);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#38bdf8';
   ctx.font = 'bold 12px "JetBrains Mono", monospace';
-  ctx.fillText(`UNIQUE ID: ${publicId}  •  SEASON ${player.season || 1}`, W - 40, 40);
+  ctx.fillText(`PLAYER ID: ${publicId}  •  SEASON ${player.season || 1}`, W - 40, 40);
 
   // LEFT BIO PANEL
   roundRect(ctx, 26, 60, 326, H - 80, 16, 'rgba(13, 20, 38, 0.92)', 'rgba(56, 189, 248, 0.38)', 1.5);
@@ -272,7 +272,7 @@ function drawProfileToCanvas(canvas, data, logoImg = null, avatarImg = null) {
   roundRect(ctx, 384, 492, 512, 52, 10, 'rgba(8, 13, 27, 0.9)', 'rgba(255,255,255,0.08)', 1);
   ctx.fillStyle = '#64748b';
   ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
-  ctx.fillText('VERIFIED CRICKET ASCEND CAREER CARD • SEARCHABLE BY NAME OR UNIQUE ID', 398, 522);
+  ctx.fillText(`SEASON ${player.season || 1} • ${String(player.nationality || 'CRICKET ASCEND').toUpperCase()} • ${publicId}`, 398, 522);
 }
 
 let cachedLogoImg = null;
@@ -394,7 +394,7 @@ export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, o
     <div class="card card-glow-cyan" style="padding:16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span class="badge badge-cyan">🪪 OFFICIAL PROFILE CARD</span>
+          <span class="badge badge-cyan">🪪 PLAYER PROFILE CARD</span>
           <span class="badge badge-gold mono">ID: ${esc(publicId)}</span>
           <span class="badge badge-muted">Includes Career Stats</span>
         </div>

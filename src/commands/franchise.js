@@ -1,7 +1,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, AttachmentBuilder } from 'discord.js';
 import db from '../database/db.js';
 import { franchiseLeagues, getFranchiseTeamRoster, getFranchiseTeamBowlers } from '../game/franchiseLeagues.js';
-import { deliveries, shots, simulateBall, simulateBallAdvanced, getReleaseHint, getDerivedShotName, generateBowlerDelivery, getOverBowler, getPlayerBattingPosition } from '../game/engine.js';
+import { deliveries, shots, simulateBall, simulateBallAdvanced, getReleaseHint, getDerivedShotName, generateBowlerDelivery, pickBowlerTypeForOver, getOverBowler, getPlayerBattingPosition } from '../game/engine.js';
 import { getPlayerEquippedShot } from '../game/shotmap.js';
 import { generateFieldImage } from './challenge.js';
 import { getEffectiveAttributes, getEquipmentBonuses, consumeEnergy, updateAndGetEnergy } from '../game/utils.js';
@@ -3071,11 +3071,14 @@ async function runFranchiseAllRounderMatch(interaction, player, pf, match, oppon
     message = await interaction.channel.send(initialARData).catch(() => {});
   }
 
+  const arOverTypes = {};
   let timedOut = false;
   // Batting Loop (faces up to 8 deliveries or until out/overs end)
   while (userWickets === 0 && ballsFaced < 8 && overs < 20) {
-    // 1. Generate Bowler Delivery (pitch-aligned diverse variations)
-    const bowlInput = generateBowlerDelivery(match.pitch);
+    // 1. Generate Bowler Delivery locked to the active over's bowler craft
+    const ovIdx = Math.floor(ballsFaced / 6);
+    if (!arOverTypes[ovIdx]) arOverTypes[ovIdx] = pickBowlerTypeForOver(match.pitch, ovIdx);
+    const bowlInput = generateBowlerDelivery(match.pitch, arOverTypes[ovIdx]);
 
     const hint = getReleaseHint(bowlInput.line, bowlInput.length, bowlInput.speed, bowlInput.variation);
 
