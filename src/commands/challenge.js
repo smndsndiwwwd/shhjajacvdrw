@@ -54,6 +54,31 @@ async function getFieldBackground() {
 
 const CHALLENGE_COOLDOWN = 30 * 60 * 1000; // 30 minutes in milliseconds
 const CHALLENGE_ENERGY_COST = 15;
+const CHALLENGE_INVITE_TTL_MS = 90 * 1000; // 90 seconds to accept + pick role
+const CHALLENGE_MATCH_TTL_MS = 35 * 60 * 1000; // 35 minutes max live duel lock
+
+// Active challenge locks per Discord user ID so a user cannot have >1 challenge at once
+const activeDiscordDuels = new Map();
+
+function getActiveDiscordDuelLock(userId) {
+  const lock = activeDiscordDuels.get(userId);
+  if (!lock) return null;
+  if (Date.now() > lock.expiresAt) {
+    activeDiscordDuels.delete(userId);
+    return null;
+  }
+  return lock;
+}
+
+function setDiscordDuelLock(userId, info) {
+  activeDiscordDuels.set(userId, info);
+}
+
+function releaseDiscordDuelLock(...userIds) {
+  for (const uid of userIds) {
+    if (uid) activeDiscordDuels.delete(uid);
+  }
+}
 
 export async function generateFieldImage(fieldPreset, highlightedZoneStr, isPowerplay = false, battingHand = 'Right') {
   if (!canvasLib) return null;
@@ -587,6 +612,22 @@ export async function handleChallenge(interaction) {
     });
   }
 
+  const existingSelfLock = getActiveDiscordDuelLock(challengerId);
+  if (existingSelfLock) {
+    return interaction.reply({
+      content: '❌ You already have an active or pending challenge! Finish it or wait for it to time out before starting another.',
+      flags: ['Ephemeral']
+    });
+  }
+
+  const existingTargetLock = getActiveDiscordDuelLock(targetId);
+  if (existingTargetLock) {
+    return interaction.reply({
+      content: `⏳ **${targetUser.username}** is already involved in another challenge! Wait until their current challenge finishes or expires.`,
+      flags: ['Ephemeral']
+    });
+  }
+
   // Defer reply to prevent timeout while querying DB
   await interaction.deferReply();
 
@@ -654,13 +695,18 @@ export async function handleChallenge(interaction) {
     components: [row]
   });
 
+  setDiscordDuelLock(challengerId, { opponentId: targetId, stage: 'pending', expiresAt: Date.now() + CHALLENGE_INVITE_TTL_MS });
+  setDiscordDuelLock(targetId, { opponentId: challengerId, stage: 'pending', expiresAt: Date.now() + CHALLENGE_INVITE_TTL_MS });
+
   const filter = i => i.user.id === targetId && i.customId.endsWith(`_${targetId}`);
   const collector = inviteMsg.createMessageComponentCollector({ filter, time: 60000 });
 
+  let duelStarted = false;
   collector.on('collect', async i => {
     collector.stop();
 
     if (i.customId.startsWith('challenge_decline_')) {
+      releaseDiscordDuelLock(challengerId, targetId);
       return await i.update({
         content: `❌ **${targetUser.username}** has declined the duel. Back to the nets!`,
         embeds: [],
@@ -671,6 +717,7 @@ export async function handleChallenge(interaction) {
     // Accept Duel Flow: Verify target energy
     const targetEnergy = updateAndGetEnergy(db, targetId);
     if (targetEnergy < CHALLENGE_ENERGY_COST) {
+      releaseDiscordDuelLock(challengerId, targetId);
       return i.reply({
         content: `❌ You do not have enough energy! Requires **${CHALLENGE_ENERGY_COST} ${emojis.energy}** (You have: ${targetEnergy}).`,
         flags: ['Ephemeral']
@@ -680,6 +727,7 @@ export async function handleChallenge(interaction) {
     // Re-verify challenger energy
     const finalChallengerEnergy = updateAndGetEnergy(db, challengerId);
     if (finalChallengerEnergy < CHALLENGE_ENERGY_COST) {
+      releaseDiscordDuelLock(challengerId, targetId);
       return i.reply({
         content: `❌ The challenger no longer has enough energy to duel. Duel cancelled.`,
         flags: ['Ephemeral']
@@ -794,11 +842,19 @@ export async function handleChallenge(interaction) {
       });
     }
 
-    // Run PvP simulation
-    runPvPSimulation(inviteMsg, challengerId, targetId, challenger.name, target.name, resolvedMode, arChoiceRole, targetRuns);
+    // Run PvP simulation and guarantee lock release once duel completes or expires
+    duelStarted = true;
+    setDiscordDuelLock(challengerId, { opponentId: targetId, stage: 'active', expiresAt: Date.now() + CHALLENGE_MATCH_TTL_MS });
+    setDiscordDuelLock(targetId, { opponentId: challengerId, stage: 'active', expiresAt: Date.now() + CHALLENGE_MATCH_TTL_MS });
+    Promise.resolve(runPvPSimulation(inviteMsg, challengerId, targetId, challenger.name, target.name, resolvedMode, arChoiceRole, targetRuns))
+      .catch(err => console.error('PvP simulation error:', err))
+      .finally(() => releaseDiscordDuelLock(challengerId, targetId));
   });
 
   collector.on('end', async (collected, reason) => {
+    if (!duelStarted) {
+      releaseDiscordDuelLock(challengerId, targetId);
+    }
     if (reason === 'time' && collected.size === 0) {
       await inviteMsg.edit({
         content: `⚠️ The challenge request timed out. **${targetUser.username}** ignored the call.`,

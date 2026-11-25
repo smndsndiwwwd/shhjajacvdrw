@@ -389,18 +389,37 @@ export async function renderFranchiseView(container, state, launchMatch, refresh
 export async function renderChallengeView(container, state, refresh) {
   const hub = await api('/api/challenge/hub');
   const activeDuel = hub.challenges.find(c => c.status === 'active');
+  const myOngoingChallenge = hub.challenges.find(c =>
+    c.status === 'active' || (c.status === 'pending' && c.challenger_id === state.player.discord_id)
+  );
+
+  const fmtTimeLeft = (expMs) => {
+    if (!expMs || expMs <= 0) return '';
+    const diff = Math.max(0, expMs - Date.now());
+    if (diff <= 0) return 'Expired';
+    const mins = Math.floor(diff / 60000);
+    const secs = Math.floor((diff % 60000) / 1000);
+    return `${mins}m ${String(secs).padStart(2, '0')}s left`;
+  };
 
   const paintDuelPlay = (duel) => {
     const st = duel.state;
     const isBatter = st.batterId === state.player.discord_id;
+    const remTxt = fmtTimeLeft(duel.expires_at);
     return `
       <div class="card card-glow-gold" style="margin-bottom:18px;">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
           <div>
-            <span class="badge badge-gold">⚔️ LIVE 1-OVER SHOWDOWN</span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="badge badge-gold">⚔️ LIVE 1-OVER SHOWDOWN</span>
+              ${remTxt ? `<span class="badge badge-crimson mono" data-chal-exp="${duel.expires_at}">⏱️ ${remTxt}</span>` : ''}
+            </div>
             <h2 style="margin-top:6px;">${esc(duel.challenger_name)} vs ${esc(duel.opponent_name)}</h2>
           </div>
-          <div class="score-big" style="font-size:1.8rem;">${st.runs}/${st.wickets} <span style="font-size:0.9rem;color:var(--cyan);">(${st.balls}/6b • Target ${st.targetRuns})</span></div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div class="score-big" style="font-size:1.8rem;">${st.runs}/${st.wickets} <span style="font-size:0.9rem;color:var(--cyan);">(${st.balls}/6b • Target ${st.targetRuns})</span></div>
+            <button class="btn btn-danger btn-sm chal-cancel" data-id="${duel.id}">🏳️ Forfeit</button>
+          </div>
         </div>
         <div class="grid-2">
           <div>
@@ -462,7 +481,12 @@ export async function renderChallengeView(container, state, refresh) {
               <label class="label">Target Runs (6–36)</label>
               <input id="chal-target" class="input" type="number" min="6" max="36" value="15" />
             </div>
-            <button class="btn btn-primary" id="btn-create-chal">⚔️ Launch Challenge</button>
+            ${myOngoingChallenge ? `
+              <div style="padding:10px 12px;border-radius:10px;background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);font-size:0.82rem;color:#fecdd3;">
+                ⚠️ You already have an ongoing <strong>${esc(myOngoingChallenge.status)}</strong> challenge (${fmtTimeLeft(myOngoingChallenge.expires_at) || 'active'}). Complete or cancel it before creating another!
+              </div>
+            ` : ''}
+            <button class="btn btn-primary" id="btn-create-chal" ${myOngoingChallenge ? 'disabled' : ''}>⚔️ Launch Challenge</button>
           </div>
         </div>
 
@@ -483,9 +507,15 @@ export async function renderChallengeView(container, state, refresh) {
                   <span class="badge badge-muted">${esc(c.status)}</span>
                 </div>
                 ${c.status === 'pending' && c.opponent_id === state.player.discord_id ? `
-                  <div style="display:flex;gap:6px;">
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
                     <button class="btn btn-emerald btn-sm chal-resp" data-id="${c.id}" data-acc="1">Accept</button>
                     <button class="btn btn-danger btn-sm chal-resp" data-id="${c.id}" data-acc="0">Decline</button>
+                  </div>
+                ` : c.status === 'pending' && c.challenger_id === state.player.discord_id ? `
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
+                    <button class="btn btn-danger btn-sm chal-cancel" data-id="${c.id}">🚫 Cancel</button>
                   </div>
                 ` : `<span class="mono" style="color:var(--gold);">Target ${c.target_runs}</span>`}
               </div>
@@ -549,6 +579,12 @@ export async function renderChallengeView(container, state, refresh) {
 
   document.querySelectorAll('.chal-resp').forEach(b => b.onclick = async () => {
     await api('/api/challenge/respond', { method: 'POST', body: { challenge_id: b.dataset.id, accept: b.dataset.acc === '1' } });
+    renderChallengeView(container, state, refresh);
+  });
+
+  document.querySelectorAll('.chal-cancel').forEach(b => b.onclick = async () => {
+    await api('/api/challenge/cancel', { method: 'POST', body: { challenge_id: b.dataset.id } });
+    toast('Challenge ended/cancelled.', 'info');
     renderChallengeView(container, state, refresh);
   });
 

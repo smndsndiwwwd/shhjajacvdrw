@@ -540,10 +540,22 @@ db.exec(`
     status TEXT DEFAULT 'pending',
     state_json TEXT,
     winner_id TEXT,
+    expires_at INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+try {
+  db.exec("ALTER TABLE web_challenges ADD COLUMN expires_at INTEGER DEFAULT 0");
+} catch (e) {
+  // Ignore if column already exists
+}
+try {
+  db.exec("UPDATE web_challenges SET status = 'expired', updated_at = datetime('now') WHERE status IN ('pending', 'active') AND (expires_at = 0 OR expires_at IS NULL) AND updated_at < datetime('now', '-30 minutes')");
+} catch (e) {
+  // Ignore startup sweep errors
+}
 
 // Unique human-readable Player ID (e.g., CA-1001) migration + backfill
 try {

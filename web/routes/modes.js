@@ -27,6 +27,70 @@ import { getPlayerEquippedShot } from '../../src/game/shotmap.js';
 import { getEffectiveAttributes, getEquipmentBonuses, addXP } from '../../src/game/utils.js';
 import { recordSystemLog } from '../../src/game/systemLog.js';
 
+const PENDING_CHALLENGE_TTL_MS = 15 * 60 * 1000; // 15 mins to accept/decline
+const ACTIVE_CHALLENGE_TTL_MS = 30 * 60 * 1000;  // 30 mins per turn/activity before auto-end
+
+export function sweepExpiredWebChallenges(database = db) {
+  const now = Date.now();
+  const due = database.prepare(`
+    SELECT * FROM web_challenges
+    WHERE status IN ('pending', 'active')
+      AND expires_at > 0
+      AND expires_at <= ?
+  `).all(now);
+
+  for (const duel of due) {
+    const state = duel.state_json ? JSON.parse(duel.state_json) : { log: [] };
+    if (!Array.isArray(state.log)) state.log = [];
+
+    if (duel.status === 'pending') {
+      state.log.unshift('Challenge timed out before opponent responded and was auto-ended.');
+      database.prepare("UPDATE web_challenges SET status = 'expired', state_json = ?, expires_at = 0, updated_at = datetime('now') WHERE id = ?")
+        .run(JSON.stringify(state), duel.id);
+      recordSystemLog({
+        level: 'INFO',
+        category: 'Challenge',
+        actor: duel.challenger_id,
+        target: duel.opponent_id,
+        title: `Challenge Auto-Expired (${duel.id})`,
+        details: 'No response within time limit'
+      });
+    } else if (duel.status === 'active') {
+      // Auto-end & award win to non-stalling player
+      const waitingOnBatter = Boolean(state.pendingDelivery);
+      const winnerId = waitingOnBatter ? state.bowlerId : state.batterId;
+      const loserId = waitingOnBatter ? state.batterId : state.bowlerId;
+
+      state.log.unshift(`Time expired! ${waitingOnBatter ? 'Batter' : 'Bowler'} failed to act in time — duel auto-ended.`);
+      database.prepare("UPDATE web_challenges SET status = 'expired', winner_id = ?, state_json = ?, expires_at = 0, updated_at = datetime('now') WHERE id = ?")
+        .run(winnerId, JSON.stringify(state), duel.id);
+
+      if (winnerId && winnerId !== 'ai_rival') {
+        database.prepare('INSERT OR IGNORE INTO challenge_stats (player_id) VALUES (?)').run(winnerId);
+        database.prepare('UPDATE challenge_stats SET played=played+1, won=won+1 WHERE player_id=?').run(winnerId);
+      }
+      if (loserId && loserId !== 'ai_rival') {
+        database.prepare('INSERT OR IGNORE INTO challenge_stats (player_id) VALUES (?)').run(loserId);
+        database.prepare('UPDATE challenge_stats SET played=played+1, lost=lost+1 WHERE player_id=?').run(loserId);
+      }
+
+      recordSystemLog({
+        level: 'MATCH',
+        category: 'Challenge',
+        actor: loserId || duel.challenger_id,
+        target: winnerId || duel.opponent_id,
+        title: `Active Duel Auto-Ended on Timeout (${duel.id})`,
+        details: { runs: state.runs, balls: state.balls, waitingOnBatter }
+      });
+    }
+  }
+  return due.length;
+}
+
+setInterval(() => {
+  try { sweepExpiredWebChallenges(); } catch {}
+}, 60 * 1000).unref();
+
 function getPlayer(res, user) {
   const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(user.player_id);
   if (!player) {
@@ -123,6 +187,10 @@ export async function handleModeRoutes(req, res, pathname) {
   if (pathname === '/api/tournament/enter' && req.method === 'POST') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    const existingTourney = db.prepare("SELECT tournament_id FROM active_tournament_run WHERE player_id = ? AND status = 'active'").get(playerId);
+    if (existingTourney) {
+      return sendJson(res, 409, { error: 'You already have an active tournament run! Complete or abandon it before entering another.' });
+    }
     const body = await parseJsonBody(req);
     const tournament = getTournamentById(String(body.tournament_id || ''));
     if (!tournament) return sendJson(res, 404, { error: 'Tournament not found.' });
@@ -374,6 +442,7 @@ export async function handleModeRoutes(req, res, pathname) {
   if (pathname === '/api/challenge/hub' && req.method === 'GET') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    sweepExpiredWebChallenges(db);
 
     const myStats = db.prepare('SELECT * FROM challenge_stats WHERE player_id = ?').get(playerId) || { played: 0, won: 0, lost: 0, runs: 0, wickets: 0, fours: 0, sixes: 0 };
     const rivals = db.prepare('SELECT discord_id, public_id, name, level, primary_role, nationality FROM players WHERE discord_id != ? ORDER BY level DESC LIMIT 50').all(playerId);
@@ -399,6 +468,19 @@ export async function handleModeRoutes(req, res, pathname) {
   if (pathname === '/api/challenge/create' && req.method === 'POST') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    sweepExpiredWebChallenges(db);
+
+    const ownOngoing = db.prepare(`
+      SELECT id, status, expires_at FROM web_challenges
+      WHERE (challenger_id = ? OR (opponent_id = ? AND status = 'active'))
+        AND status IN ('pending', 'active')
+    `).get(playerId, playerId);
+    if (ownOngoing) {
+      return sendJson(res, 409, {
+        error: `You already have an active or pending challenge (${ownOngoing.status.toUpperCase()})! Complete, cancel, or wait for it to expire before starting another.`
+      });
+    }
+
     const body = await parseJsonBody(req);
     let opponentId = String(body.opponent_id || 'ai_rival').trim();
     const targetRuns = Math.min(36, Math.max(6, Number(body.target_runs) || 15));
@@ -409,9 +491,18 @@ export async function handleModeRoutes(req, res, pathname) {
       if (!opp) return sendJson(res, 404, { error: 'Opponent not found.' });
       opponentId = opp.discord_id;
       if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
+
+      const oppBusy = db.prepare(`
+        SELECT id FROM web_challenges
+        WHERE (challenger_id = ? OR opponent_id = ?) AND status = 'active'
+      `).get(opponentId, opponentId);
+      if (oppBusy) {
+        return sendJson(res, 409, { error: 'That opponent is already in an active duel! Wait until their current challenge finishes.' });
+      }
     }
 
     const id = `duel_${crypto.randomBytes(5).toString('hex')}`;
+    const expiresAt = Date.now() + (isAi ? ACTIVE_CHALLENGE_TTL_MS : PENDING_CHALLENGE_TTL_MS);
     const state = {
       innings: 1,
       batterId: playerId,
@@ -429,9 +520,9 @@ export async function handleModeRoutes(req, res, pathname) {
     };
 
     db.prepare(`
-      INSERT INTO web_challenges (id, challenger_id, opponent_id, target_runs, status, state_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, playerId, opponentId, targetRuns, isAi ? 'active' : 'pending', JSON.stringify(state));
+      INSERT INTO web_challenges (id, challenger_id, opponent_id, target_runs, status, state_json, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, playerId, opponentId, targetRuns, isAi ? 'active' : 'pending', JSON.stringify(state), expiresAt);
 
     recordSystemLog({
       level: 'INFO',
@@ -439,33 +530,86 @@ export async function handleModeRoutes(req, res, pathname) {
       actor: user.username,
       target: opponentId,
       title: `Created PvP Duel (${id})`,
-      details: { targetRuns, isAi },
+      details: { targetRuns, isAi, expiresAt },
       ip
     });
-    return sendJson(res, 201, { id, status: isAi ? 'active' : 'pending', state });
+    return sendJson(res, 201, { id, status: isAi ? 'active' : 'pending', expires_at: expiresAt, state });
+  }
+
+  if (pathname === '/api/challenge/cancel' && req.method === 'POST') {
+    const player = getPlayer(res, user);
+    if (!player) return true;
+    sweepExpiredWebChallenges(db);
+    const body = await parseJsonBody(req);
+    const duel = db.prepare('SELECT * FROM web_challenges WHERE id = ?').get(String(body.challenge_id || ''));
+    if (!duel) return sendJson(res, 404, { error: 'Challenge not found.' });
+    if (duel.challenger_id !== playerId && duel.opponent_id !== playerId) {
+      return sendJson(res, 403, { error: 'Not authorized to cancel this challenge.' });
+    }
+    if (!['pending', 'active'].includes(duel.status)) {
+      return sendJson(res, 400, { error: 'Challenge is already finished.' });
+    }
+
+    const st = duel.state_json ? JSON.parse(duel.state_json) : { log: [] };
+    if (!Array.isArray(st.log)) st.log = [];
+    st.log.unshift(`${player.name} ended/cancelled the challenge.`);
+    const nextStatus = duel.status === 'pending' ? 'cancelled' : 'forfeited';
+    const winnerId = duel.status === 'active'
+      ? (duel.challenger_id === playerId ? duel.opponent_id : duel.challenger_id)
+      : null;
+
+    db.prepare("UPDATE web_challenges SET status = ?, winner_id = ?, state_json = ?, expires_at = 0, updated_at = datetime('now') WHERE id = ?")
+      .run(nextStatus, winnerId, JSON.stringify(st), duel.id);
+
+    recordSystemLog({
+      level: 'INFO',
+      category: 'Challenge',
+      actor: user.username,
+      target: duel.id,
+      title: `Challenge ${nextStatus === 'cancelled' ? 'Cancelled' : 'Forfeited'}`,
+      ip
+    });
+    return sendJson(res, 200, { ok: true, status: nextStatus });
   }
 
   if (pathname === '/api/challenge/respond' && req.method === 'POST') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    sweepExpiredWebChallenges(db);
     const body = await parseJsonBody(req);
     const duel = db.prepare('SELECT * FROM web_challenges WHERE id = ?').get(String(body.challenge_id || ''));
     if (!duel) return sendJson(res, 404, { error: 'Challenge not found.' });
-    if (duel.opponent_id !== playerId || duel.status !== 'pending') {
+    if (duel.status !== 'pending') {
+      return sendJson(res, 410, { error: `This challenge is no longer pending (${duel.status}).` });
+    }
+    if (duel.opponent_id !== playerId) {
       return sendJson(res, 403, { error: 'Only the challenged player can respond to a pending duel.' });
     }
 
+    if (body.accept) {
+      const busy = db.prepare(`
+        SELECT id FROM web_challenges
+        WHERE (challenger_id = ? OR opponent_id = ?) AND status IN ('pending', 'active') AND id != ?
+      `).get(playerId, playerId, duel.id);
+      if (busy) {
+        return sendJson(res, 409, { error: 'Finish or cancel your own active/pending challenge before accepting another.' });
+      }
+    }
+
     const nextStatus = body.accept ? 'active' : 'declined';
-    db.prepare("UPDATE web_challenges SET status = ?, updated_at = datetime('now') WHERE id = ?").run(nextStatus, duel.id);
-    return sendJson(res, 200, { ok: true, status: nextStatus });
+    const nextExp = body.accept ? Date.now() + ACTIVE_CHALLENGE_TTL_MS : 0;
+    db.prepare("UPDATE web_challenges SET status = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(nextStatus, nextExp, duel.id);
+    return sendJson(res, 200, { ok: true, status: nextStatus, expires_at: nextExp });
   }
 
   if (pathname === '/api/challenge/play' && req.method === 'POST') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    sweepExpiredWebChallenges(db);
     const body = await parseJsonBody(req);
     const duel = db.prepare('SELECT * FROM web_challenges WHERE id = ?').get(String(body.challenge_id || ''));
-    if (!duel || duel.status !== 'active') return sendJson(res, 400, { error: 'Challenge is not active.' });
+    if (!duel || duel.status !== 'active') return sendJson(res, 400, { error: 'Challenge is not active or has timed out.' });
     if (duel.challenger_id !== playerId && duel.opponent_id !== playerId) {
       return sendJson(res, 403, { error: 'You are not part of this duel.' });
     }
@@ -480,8 +624,9 @@ export async function handleModeRoutes(req, res, pathname) {
       const { line = 'Stumps', length = 'Good Length', variation = 'Normal Delivery', speed = 'Fast', fieldPreset = 'Balanced' } = body;
       state.pendingDelivery = { line, length, variation, speed, fieldPreset };
       state.log.unshift(`Bowler selected delivery (${fieldPreset} field). Waiting for batter!`);
-      db.prepare("UPDATE web_challenges SET state_json = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), duel.id);
-      return sendJson(res, 200, { challenge: { ...duel, state } });
+      const nextExp = Date.now() + ACTIVE_CHALLENGE_TTL_MS;
+      db.prepare("UPDATE web_challenges SET state_json = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), nextExp, duel.id);
+      return sendJson(res, 200, { challenge: { ...duel, expires_at: nextExp, state } });
     }
 
     if (isBatter) {
@@ -534,7 +679,7 @@ export async function handleModeRoutes(req, res, pathname) {
       if (batterWon || bowlerWon) {
         const winnerId = batterWon ? state.batterId : state.bowlerId;
         const loserId = batterWon ? state.bowlerId : state.batterId;
-        db.prepare("UPDATE web_challenges SET status = 'completed', winner_id = ?, state_json = ?, updated_at = datetime('now') WHERE id = ?")
+        db.prepare("UPDATE web_challenges SET status = 'completed', winner_id = ?, state_json = ?, expires_at = 0, updated_at = datetime('now') WHERE id = ?")
           .run(winnerId, JSON.stringify(state), duel.id);
 
         db.prepare('INSERT OR IGNORE INTO challenge_stats (player_id) VALUES (?)').run(state.batterId);
@@ -568,8 +713,9 @@ export async function handleModeRoutes(req, res, pathname) {
         return sendJson(res, 200, { challenge: { ...duel, status: 'completed', winner_id: winnerId, state } });
       }
 
-      db.prepare("UPDATE web_challenges SET state_json = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), duel.id);
-      return sendJson(res, 200, { challenge: { ...duel, state } });
+      const nextExp = Date.now() + ACTIVE_CHALLENGE_TTL_MS;
+      db.prepare("UPDATE web_challenges SET state_json = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), nextExp, duel.id);
+      return sendJson(res, 200, { challenge: { ...duel, expires_at: nextExp, state } });
     }
   }
 

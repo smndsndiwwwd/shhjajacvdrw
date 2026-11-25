@@ -34,6 +34,31 @@ import { getPlayerTier, PITCH_TYPES } from './helpers.js';
 
 // In-memory active web match sessions keyed by player.discord_id
 const activeMatches = new Map();
+const MATCH_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // Auto-end inactive matches after 45 minutes
+
+export function sweepExpiredWebMatches() {
+  const now = Date.now();
+  for (const [pid, match] of activeMatches.entries()) {
+    const lastTs = match.lastActivityAt || match.startedAt || now;
+    if (now - lastTs > MATCH_IDLE_TIMEOUT_MS) {
+      if (!match.finished) {
+        recordSystemLog({
+          level: 'WARN',
+          category: 'Match',
+          actor: match.playerName || pid,
+          target: match.opponent,
+          title: `Match Auto-Ended on Inactivity Timeout (${match.mode.toUpperCase()})`,
+          details: `${match.title}`
+        });
+      }
+      activeMatches.delete(pid);
+    }
+  }
+}
+
+setInterval(() => {
+  try { sweepExpiredWebMatches(); } catch {}
+}, 60 * 1000).unref();
 
 function randomPitch() {
   return PITCH_TYPES[Math.floor(Math.random() * PITCH_TYPES.length)];
@@ -151,6 +176,7 @@ function simulateAITeammateFinish(runsScored, currentTeamRuns, targetRuns, overs
 }
 
 export function getActiveWebMatch(playerId) {
+  sweepExpiredWebMatches();
   const m = activeMatches.get(playerId);
   if (!m) return null;
   return serializeMatchState(m);
@@ -244,11 +270,19 @@ function serializeMatchState(match) {
 }
 
 export function startWebMatch(playerId, options = {}) {
+  sweepExpiredWebMatches();
   const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
   if (!player) throw new Error('Create your cricketer first before starting a match.');
 
   if (activeMatches.has(playerId)) {
-    return serializeMatchState(activeMatches.get(playerId));
+    const existing = activeMatches.get(playerId);
+    if (existing.finished) {
+      activeMatches.delete(playerId);
+    } else if (options.resume) {
+      return serializeMatchState(existing);
+    } else {
+      throw new Error(`You already have a live match in progress (${existing.title}). Resume or forfeit it before starting a new match!`);
+    }
   }
 
   const { mode = 'practice', tournamentTeamId = null } = options;
@@ -556,6 +590,8 @@ export function startWebMatch(playerId, options = {}) {
     lastFieldPreset: 'Balanced',
     lastBall: null,
     ballHistory: [],
+    startedAt: Date.now(),
+    lastActivityAt: Date.now(),
     commentaryLog: preNotes.length > 0 ? preNotes : [`Match started on ${matchConfig.pitch} against ${matchConfig.opponent}.`],
     resultSummary: null,
     storyEvent: null
@@ -577,9 +613,11 @@ export function startWebMatch(playerId, options = {}) {
 }
 
 export function playWebMatchBall(playerId, action = {}) {
+  sweepExpiredWebMatches();
   const match = activeMatches.get(playerId);
-  if (!match) throw new Error('No active match found.');
+  if (!match) throw new Error('No active match found (or it timed out from inactivity).');
   if (match.finished) return serializeMatchState(match);
+  match.lastActivityAt = Date.now();
 
   const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
   if (!player) throw new Error('Player profile missing.');
