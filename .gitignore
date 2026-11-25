@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+career.db
+career.db-shm
+career.db-wal
+database.sqlite
+scratch/
+*.zip
+*.log
+temp_*.tar.gz
+test_left_field.png

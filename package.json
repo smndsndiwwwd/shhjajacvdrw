@@ -1,0 +1,22 @@
+{
+  "name": "Admin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "startup.js",
+  "scripts": {
+    "start": "node startup.js",
+    "web": "node web/server.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.1",
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.4.2"
+  }
+}

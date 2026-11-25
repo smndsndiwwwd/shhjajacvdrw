@@ -1,0 +1,159 @@
+================================================================================
+🏏 VIRTUAL CM (VIRTUAL CAREER MODE) - COMPLETE PLAYERS GUIDE 🏏
+================================================================================
+
+Welcome, player! This guide explains all the features, math, standing systems, and 
+match engine matchups in Virtual Career Mode so you can rise from an Academy raw 
+recruit to an International Cricket Legend!
+
+--------------------------------------------------------------------------------
+1. 👤 PLAYER VITALS & SYSTEM STATS
+--------------------------------------------------------------------------------
+Your profile (/profile) tracks six main vitals that change dynamically as you 
+play, train, and make career decisions:
+
+⚡ ENERGY:
+   - Your physical battery. Maxes out at 100.
+   - Both training drills (/train) and playing matches (/play) consume 15 Energy.
+   - Energy refills passively over time. Keep an eye on your battery!
+   
+🔥 CONFIDENCE:
+   - Ranges from 10 to 100.
+   - Changes ball-by-ball during a match.
+   - Hitting boundaries (+4s/6s) boosts confidence (+6).
+   - Playing dot balls reduces confidence. Getting dismissed reduces it by -15.
+   - High confidence increases your matchup rating, making boundaries easier. 
+     Low confidence increases the risk of edges or getting bowled.
+     
+📈 Recent Form:
+   - Ranges from 20 to 100.
+   - Matches your recent performances. Winning a match raises form by +10. 
+     Losing a match reduces form by -10.
+   - Higher form increases contract bids from clubs!
+   
+🎖️ REPUTATION:
+   - Your fame and standing in the cricket world. Starts at 0.
+   - Critical for unlocking major club contract offers and brand sponsorships.
+   - How to earn Reputation:
+     1. Play Chapter Matches: Completing chapters yields large reputation boosts.
+     2. Match Victories: Defeating opponents increases reputation.
+     3. Training Regimes: Consistently practicing grants minor reputation.
+     4. Story Choices: Post-match random events have choices that can raise or 
+        lower your reputation (e.g. arguing with coach vs apologizing).
+        
+🌟 SKILL POINTS (SP):
+   - Earned by leveling up. Each Level Up gives you +1 Skill Point.
+   - Spend SP in the Skill Tree (/skills view & /skills unlock) to get passive 
+     perks (like power timing windows, yorker defence, spinner sweeps).
+     
+🪙 COINS:
+   - The bot's primary currency. Use coins to buy equipment from the shop (/equipment shop)
+     or request academy transfers.
+   - Earn coins by playing matches, completing chapters, signing contract salaries,
+     and securing brand sponsorships.
+
+--------------------------------------------------------------------------------
+2. 🎓 TRAINING ACADEMIES & TRANSFERS
+--------------------------------------------------------------------------------
+Every player begins at a Cricket Academy. Academies provide passive training multipliers:
+  - Elite Cricket Academy: +8% Batting XP, +5% Fitness XP (Arthur)
+  - National High Performance Centre: +5% Batting/Bowling, +3% Stamina (Shastri)
+  - Dustbowl Spin Academy: +10% Spin Batting & Spin Bowling XP (Murali)
+  - Lightning Pace Foundry: +8% Pace Bowling, +5% Power XP (Donald)
+
+Transferring Academies:
+  - If you want a different specialty, run /academy.
+  - You can request a transfer to any other academy once per season for a transfer fee 
+    of 200 Coins.
+
+--------------------------------------------------------------------------------
+3. 🏋️ TRAINING REGIMES (/train)
+--------------------------------------------------------------------------------
+Train to boost your attributes and gain XP! Each session costs 15 Energy & 1 Token:
+  - Nets Batting Practice: Boosts Batting Attributes (Power, Timing, Technique, Defense).
+  - Target Bowling Drills: Boosts Bowling Attributes (Swing, Spin Bowling, Accuracy, Variations).
+  - Gym Workout: Boosts Physical Attributes (Fitness, Stamina, Power).
+  - Sprint & Fielding Drills: Boosts Athletics (Running Speed, Fielding, Reflexes, Throw Accuracy).
+
+Each session awards +100 Base XP (modified by academy multipliers) and attributes boost.
+Leveling up gives you +1 Skill Point and adds a permanent +1 boost to ALL attributes!
+
+--------------------------------------------------------------------------------
+4. 💼 CLUB CONTRACTS & DRAFTS (/contracts)
+--------------------------------------------------------------------------------
+  - Levels 1-3: You play under an academy stipend (20 Coins / Match).
+  - Level 4+: Request club bids using /contracts.
+  - Three local, state, or franchise clubs will bid for your signature.
+  - Your level and reputation determine the salary bid.
+  - Signing a contract awards you a set salary in coins for every match you play!
+  - Contracts last for a set number of seasons. When your contract expires, you return 
+    to academy status until you request new bids.
+
+--------------------------------------------------------------------------------
+5. 👟 BRAND SPONSORSHIPS (/sponsors)
+--------------------------------------------------------------------------------
+Sponsors are premium endorsement contracts you sign to get massive rewards:
+  - Check eligible sponsors in the /sponsors menu.
+  - Unlocking sponsors requires meeting Reputation milestones.
+  - Signing a sponsor gives you:
+    1. A large, immediate Sign-on Coin Bonus.
+    2. Premium Sponsor Gear delivered to your inventory (grips, bats, shoes).
+  - Signing a new sponsor replaces your current sponsor. Build your reputation 
+    to attract high-tier brands (like Apex or WoodWorks Willow)!
+
+--------------------------------------------------------------------------------
+6. 🎒 EQUIPMENT SHOP & INVENTORY (/inventory & /equipment)
+--------------------------------------------------------------------------------
+  - Visit the shop (/equipment shop) to buy gear using your coins.
+  - Items are categorized into Bats, Shoes, Grips, Gloves, and Pads.
+  - Rarity Tiers: Common (white), Rare (blue), Epic (purple), Legendary (yellow).
+  - Equipping Gear: View your equipment bag (/inventory) and select an item to equip.
+    Only one item of each type can be equipped at a time.
+  - Equipped gear adds passive attribute boosts (+Power, +Running) to your matchup rolls.
+
+--------------------------------------------------------------------------------
+7. ⚔️ PVP CHALLENGE MODE DUELS (/challenge)
+--------------------------------------------------------------------------------
+Want to prove you are the best batsman or bowler? Duel other players in real-time!
+  - duel: Challenge any player in the guild to a 1-over (6 balls) shootout.
+    - Energy Cost: 15 Energy from both players.
+    - Cooldown: 30 minutes.
+    - Shootout: Both players play a simulated 1-over shootout. Highest score wins!
+    - Rewards:
+      - Winner: +200 Coins, +150 XP, +10 Reputation, +15 Recent Form.
+      - Loser: +50 Coins, +50 XP, -5 Reputation, -5 Recent Form.
+      - Tie: +100 Coins, +100 XP to both players.
+  - stats: Check your separate Challenge Mode stats (played, won, lost, runs, boundaries).
+  - leaderboard: View the global duels leaderboard rendered with beautiful image graphics!
+
+--------------------------------------------------------------------------------
+8. 🏏 CRICKET MATCH ENGINE & STRATEGY (/play)
+--------------------------------------------------------------------------------
+Matches are simulated ball-by-ball. Batting and bowling success is based on a 
+hidden matchup rating between the ball delivery type and the shot type selected.
+
+⚾ BATTING MATCHUPS:
+   - Yorker delivery: Best countered by DEFENSIVE SHOT or STRAIGHT DRIVE.
+     DO NOT Slog, Pull, or Hook against Yorkers (high bowled/LBW risk).
+   - Bouncer / Short ball: Countered by PULL SHOT, HOOK SHOT, or UPPER CUT.
+     DO NOT Drive or Sweep against bouncers (high catch risk).
+   - Spin (Offbreak/Legbreak/Googly): Countered by SWEEP SHOT or REVERSE SWEEP.
+     DO NOT Cut spin balls (high edge/stumped risk).
+   - Seam / Swing delivery: Countered by STRAIGHT DRIVE or COVER DRIVE.
+     DO NOT Slog or Cut swing deliveries (high slips catch risk).
+
+🔴 BOWLING MATCHUPS:
+   - Select Outswing, Yorker, Bouncer, or Googly to trick the batsman.
+   - Aligning your delivery to the pitch type (Standard, Grass, Dustbowl) increases 
+     the batsman's mistake rate.
+   - High Accuracy and Variations attributes result in dot balls and wickets!
+
+🏆 CHAPTER PROGRESSION:
+   - Run /chapters to view the campaign list.
+   - Play Chapter matches to progress through the 20 levels. Each level increases in 
+     difficulty and target scores, culminating in representing your country in the 
+     International Tier chapters.
+
+================================================================================
+Good luck on the pitch! Practice hard, sign deals, and score big runs! 🏏
+================================================================================
