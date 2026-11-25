@@ -213,7 +213,7 @@ async function renderShell() {
         navigate('dashboard');
       });
     } else if (state.route === 'dashboard' && hasPlayer) {
-      renderDashboardView(viewRoot, state, navigate);
+      renderDashboardView(viewRoot, state, navigate, refreshBootstrap);
     } else if (state.route === 'match' && hasPlayer) {
       cleanupActiveView = renderMatchView(viewRoot, state, async (m) => {
         state.activeMatch = m;
@@ -226,7 +226,7 @@ async function renderShell() {
     } else if (state.route === 'franchise' && hasPlayer) {
       await renderFranchiseView(viewRoot, state, launchMatch, refreshBootstrap);
     } else if (state.route === 'challenge' && hasPlayer) {
-      await renderChallengeView(viewRoot, state, refreshBootstrap);
+      cleanupActiveView = await renderChallengeView(viewRoot, state, refreshBootstrap);
     } else if (state.route === 'players' && (hasPlayer || isAdmin)) {
       await renderPlayersScoutView(viewRoot, state, navigate, refreshBootstrap);
     } else if (state.route === 'training' && hasPlayer) {

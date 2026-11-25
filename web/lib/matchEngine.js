@@ -131,7 +131,7 @@ export function computeTimingProfile(match, playerOpt = null) {
   };
 }
 
-function resolveBattingTiming(timingChoice, needlePos, timingProfile, confidence, activeSkills, isClutch) {
+export function resolveBattingTiming(timingChoice, needlePos, timingProfile, confidence, activeSkills, isClutch) {
   if (typeof needlePos === 'number' && !Number.isNaN(needlePos)) {
     const dist = Math.abs(needlePos - 50);
     if (dist <= timingProfile.sweetHalf) return 'Perfect';
@@ -186,7 +186,7 @@ export function clearActiveWebMatch(playerId) {
   activeMatches.delete(playerId);
 }
 
-function buildInitialReleaseCue(d) {
+export function buildInitialReleaseCue(d) {
   if (!d) return '👀 *Bowler walks back to the mark...*';
   const spd = d.speed === 'Fast'
     ? 'steams in rapidly from the boundary'
@@ -202,7 +202,7 @@ function buildInitialReleaseCue(d) {
   return `👀 **Initial Release Hint:** The bowler ${spd}${gripHint}. *Commit your Stance, Footwork & Intent before reading the pitch!*`;
 }
 
-function buildFullDeliveryReveal(d) {
+export function buildFullDeliveryReveal(d) {
   if (!d) return '';
   return `🥎 **Full Delivery Read:** **${d.speed} ${d.variation}** pitched **${d.length}** on **${d.line}**!`;
 }

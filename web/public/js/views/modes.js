@@ -1,6 +1,6 @@
 import { api, esc, formatRichText, toast, openModal, closeModal } from '../api.js';
-import { renderFieldRadarSVG } from '../components/radar.js';
 import { openPlayerProfileModal } from '../components/profileCard.js';
+import { mountChallengeDuelArena } from './challengeDuel.js';
 
 // ==========================================
 // 1. CAREER CHAPTERS & PRACTICE VIEW
@@ -387,8 +387,17 @@ export async function renderFranchiseView(container, state, launchMatch, refresh
 // 4. CHALLENGE MODE (PvP DUELS) VIEW
 // ==========================================
 export async function renderChallengeView(container, state, refresh) {
+  let arenaCleanup = null;
   const hub = await api('/api/challenge/hub');
+  let dismissed = [];
+  try { dismissed = JSON.parse(sessionStorage.getItem('ca_dismissed_challenges') || '[]'); } catch {}
+
   const activeDuel = hub.challenges.find(c => c.status === 'active');
+  const recentEndedDuel = !activeDuel
+    ? hub.challenges.find(c => ['completed', 'expired', 'forfeited'].includes(c.status) && !dismissed.includes(c.id))
+    : null;
+  const featuredDuel = activeDuel || recentEndedDuel;
+
   const myOngoingChallenge = hub.challenges.find(c =>
     c.status === 'active' || (c.status === 'pending' && c.challenger_id === state.player.discord_id)
   );
@@ -402,66 +411,9 @@ export async function renderChallengeView(container, state, refresh) {
     return `${mins}m ${String(secs).padStart(2, '0')}s left`;
   };
 
-  const paintDuelPlay = (duel) => {
-    const st = duel.state;
-    const isBatter = st.batterId === state.player.discord_id;
-    const remTxt = fmtTimeLeft(duel.expires_at);
-    return `
-      <div class="card card-glow-gold" style="margin-bottom:18px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
-          <div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span class="badge badge-gold">⚔️ LIVE 1-OVER SHOWDOWN</span>
-              ${remTxt ? `<span class="badge badge-crimson mono" data-chal-exp="${duel.expires_at}">⏱️ ${remTxt}</span>` : ''}
-            </div>
-            <h2 style="margin-top:6px;">${esc(duel.challenger_name)} vs ${esc(duel.opponent_name)}</h2>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <div class="score-big" style="font-size:1.8rem;">${st.runs}/${st.wickets} <span style="font-size:0.9rem;color:var(--cyan);">(${st.balls}/6b • Target ${st.targetRuns})</span></div>
-            <button class="btn btn-danger btn-sm chal-cancel" data-id="${duel.id}">🏳️ Forfeit</button>
-          </div>
-        </div>
-        <div class="grid-2">
-          <div>
-            ${isBatter ? `
-              ${st.pendingDelivery ? `
-                <div style="padding:10px;border-radius:10px;background:rgba(56,189,248,0.12);margin-bottom:12px;font-size:0.86rem;">
-                  🥎 Delivery incoming: <strong>${esc(st.pendingDelivery.speed)} ${esc(st.pendingDelivery.variation)}</strong> on <strong>${esc(st.pendingDelivery.line)}</strong> (${esc(st.pendingDelivery.length)})
-                </div>
-                <div class="grid-2" style="gap:8px;margin-bottom:10px;">
-                  <div><label class="label">Stance</label><select id="pvp-stance" class="select"><option>In Line</option><option>Off Side</option><option>Leg Side</option></select></div>
-                  <div><label class="label">Footwork</label><select id="pvp-fw" class="select"><option>Front Foot</option><option>Back Foot</option><option>Advanced</option><option>Leave</option></select></div>
-                  <div><label class="label">Intent</label><select id="pvp-intent" class="select"><option>Stroke</option><option>Loft</option><option>Push</option><option>Leave</option></select></div>
-                  <div><label class="label">Zone</label><select id="pvp-zone" class="select"><option>Cover</option><option>Long Off</option><option>Long On</option><option>Mid Wicket</option><option>Square Leg</option><option>Fine Leg</option><option>Point</option><option>Third Man</option></select></div>
-                </div>
-                <button class="btn btn-emerald" id="btn-pvp-bat" data-id="${duel.id}">🏏 Play Shot</button>
-              ` : `<div style="color:var(--gold);">⏳ Waiting for opponent bowler to pick delivery... <button class="btn btn-sm" id="btn-pvp-poll">🔄 Refresh</button></div>`}
-            ` : `
-              ${!st.pendingDelivery ? `
-                <div class="grid-2" style="gap:8px;margin-bottom:10px;">
-                  <div><label class="label">Line</label><select id="pvp-line" class="select"><option>Stumps</option><option>Off Side</option><option>Leg Side</option><option>Wide</option></select></div>
-                  <div><label class="label">Length</label><select id="pvp-len" class="select"><option>Good Length</option><option>Yorker</option><option>Full</option><option>Short</option></select></div>
-                  <div><label class="label">Variation</label><select id="pvp-var" class="select"><option>Normal Delivery</option><option>Swing/Spin</option><option>Cutter/Googly</option><option>Slower Ball</option></select></div>
-                  <div><label class="label">Field Trap</label><select id="pvp-fld" class="select"><option>Balanced</option><option>Attacking</option><option>Defensive</option></select></div>
-                </div>
-                <button class="btn btn-primary" id="btn-pvp-bowl" data-id="${duel.id}">🥎 Send Delivery</button>
-              ` : `<div style="color:var(--gold);">⏳ Delivery sent! Waiting for batter to swing... <button class="btn btn-sm" id="btn-pvp-poll">🔄 Refresh</button></div>`}
-            `}
-          </div>
-          <div>
-            ${renderFieldRadarSVG({ fieldPreset: st.pendingDelivery?.fieldPreset || 'Balanced', isPowerplay: true, battingHand: state.player.batting_hand })}
-          </div>
-        </div>
-        <div class="commentary-feed" style="margin-top:12px;">
-          ${(st.log || []).map(l => `<div class="comm-item">${formatRichText(l)}</div>`).join('')}
-        </div>
-      </div>
-    `;
-  };
-
   container.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:18px;">
-      ${activeDuel ? paintDuelPlay(activeDuel) : ''}
+      <div id="challenge-arena-host"></div>
 
       <div class="grid-2">
         <div class="card card-glow-cyan">
@@ -499,27 +451,36 @@ export async function renderChallengeView(container, state, refresh) {
           </div>
 
           <h4 style="margin:16px 0 8px;">Recent &amp; Pending Duels</h4>
-          <div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;">
-            ${hub.challenges.map(c => `
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;background:rgba(6,10,22,0.75);font-size:0.82rem;">
-                <div>
-                  <strong>${esc(c.challenger_name)} ${c.challenger_public_id ? `[${esc(c.challenger_public_id)}]` : ''} vs ${esc(c.opponent_name)} ${c.opponent_public_id ? `[${esc(c.opponent_public_id)}]` : ''}</strong>
-                  <span class="badge badge-muted">${esc(c.status)}</span>
+          <div style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;">
+            ${hub.challenges.map(c => {
+              const winLbl = c.winner_name ? `🏆 ${c.winner_name}` : '';
+              return `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:rgba(6,10,22,0.75);font-size:0.82rem;">
+                  <div>
+                    <strong>${esc(c.challenger_name)} ${c.challenger_public_id ? `[${esc(c.challenger_public_id)}]` : ''} vs ${esc(c.opponent_name)} ${c.opponent_public_id ? `[${esc(c.opponent_public_id)}]` : ''}</strong>
+                    <span class="badge badge-muted">${esc(c.status)}</span>
+                    ${winLbl ? `<span class="badge badge-emerald" style="margin-left:4px;">${esc(winLbl)}</span>` : ''}
+                  </div>
+                  ${c.status === 'pending' && c.opponent_id === state.player.discord_id ? `
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
+                      <button class="btn btn-emerald btn-sm chal-resp" data-id="${c.id}" data-acc="1">Accept</button>
+                      <button class="btn btn-danger btn-sm chal-resp" data-id="${c.id}" data-acc="0">Decline</button>
+                    </div>
+                  ` : c.status === 'pending' && c.challenger_id === state.player.discord_id ? `
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
+                      <button class="btn btn-danger btn-sm chal-cancel" data-id="${c.id}">🚫 Cancel</button>
+                    </div>
+                  ` : `
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      <span class="mono" style="color:var(--gold);">${c.state?.runs || 0}/${c.state?.wickets || 0} (T:${c.target_runs})</span>
+                      ${['completed', 'expired', 'forfeited'].includes(c.status) ? `<button class="btn btn-sm chal-view-res" data-id="${c.id}">📜 Summary</button>` : ''}
+                    </div>
+                  `}
                 </div>
-                ${c.status === 'pending' && c.opponent_id === state.player.discord_id ? `
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
-                    <button class="btn btn-emerald btn-sm chal-resp" data-id="${c.id}" data-acc="1">Accept</button>
-                    <button class="btn btn-danger btn-sm chal-resp" data-id="${c.id}" data-acc="0">Decline</button>
-                  </div>
-                ` : c.status === 'pending' && c.challenger_id === state.player.discord_id ? `
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    ${c.expires_at ? `<span class="mono" style="font-size:0.72rem;color:var(--gold);">${fmtTimeLeft(c.expires_at)}</span>` : ''}
-                    <button class="btn btn-danger btn-sm chal-cancel" data-id="${c.id}">🚫 Cancel</button>
-                  </div>
-                ` : `<span class="mono" style="color:var(--gold);">Target ${c.target_runs}</span>`}
-              </div>
-            `).join('') || '<div style="color:var(--text-muted);font-size:0.84rem;">No challenges yet.</div>'}
+              `;
+            }).join('') || '<div style="color:var(--text-muted);font-size:0.84rem;">No challenges yet.</div>'}
           </div>
         </div>
       </div>
@@ -550,6 +511,30 @@ export async function renderChallengeView(container, state, refresh) {
     </div>
   `;
 
+  const mountDuel = (duelObj) => {
+    if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
+    const host = document.getElementById('challenge-arena-host');
+    if (!duelObj || !host) { if (host) host.innerHTML = ''; return; }
+    arenaCleanup = mountChallengeDuelArena(host, duelObj, state, {
+      onCompleteDismiss: async (doneId) => {
+        try {
+          if (!dismissed.includes(doneId)) dismissed.push(doneId);
+          sessionStorage.setItem('ca_dismissed_challenges', JSON.stringify(dismissed.slice(-20)));
+        } catch {}
+        if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
+        await refresh();
+        renderChallengeView(container, state, refresh);
+      },
+      onReloadHub: async () => {
+        if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
+        await refresh();
+        renderChallengeView(container, state, refresh);
+      }
+    });
+  };
+
+  if (featuredDuel) mountDuel(featuredDuel);
+
   const oppFilter = document.getElementById('chal-opp-filter');
   const oppSel = document.getElementById('chal-opp');
   if (oppFilter && oppSel) {
@@ -569,56 +554,34 @@ export async function renderChallengeView(container, state, refresh) {
     openPlayerProfileModal(b.dataset.id, state.player.discord_id);
   });
 
+  document.querySelectorAll('.chal-view-res').forEach(b => b.onclick = () => {
+    const c = hub.challenges.find(x => x.id === b.dataset.id);
+    if (c) mountDuel(c);
+  });
+
   document.getElementById('btn-create-chal').onclick = async () => {
     const opponent_id = document.getElementById('chal-opp').value;
     const target_runs = Number(document.getElementById('chal-target').value) || 15;
     await api('/api/challenge/create', { method: 'POST', body: { opponent_id, target_runs } });
     toast('Challenge duel created!', 'success');
+    if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
     renderChallengeView(container, state, refresh);
   };
 
   document.querySelectorAll('.chal-resp').forEach(b => b.onclick = async () => {
     await api('/api/challenge/respond', { method: 'POST', body: { challenge_id: b.dataset.id, accept: b.dataset.acc === '1' } });
+    if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
     renderChallengeView(container, state, refresh);
   });
 
   document.querySelectorAll('.chal-cancel').forEach(b => b.onclick = async () => {
     await api('/api/challenge/cancel', { method: 'POST', body: { challenge_id: b.dataset.id } });
     toast('Challenge ended/cancelled.', 'info');
+    if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
     renderChallengeView(container, state, refresh);
   });
 
-  const pollBtn = document.getElementById('btn-pvp-poll');
-  if (pollBtn) pollBtn.onclick = () => renderChallengeView(container, state, refresh);
-
-  const batBtn = document.getElementById('btn-pvp-bat');
-  if (batBtn) batBtn.onclick = async () => {
-    await api('/api/challenge/play', {
-      method: 'POST',
-      body: {
-        challenge_id: batBtn.dataset.id,
-        stance: document.getElementById('pvp-stance').value,
-        footwork: document.getElementById('pvp-fw').value,
-        intent: document.getElementById('pvp-intent').value,
-        zone: document.getElementById('pvp-zone').value
-      }
-    });
-    await refresh();
-    renderChallengeView(container, state, refresh);
-  };
-
-  const bowlBtn = document.getElementById('btn-pvp-bowl');
-  if (bowlBtn) bowlBtn.onclick = async () => {
-    await api('/api/challenge/play', {
-      method: 'POST',
-      body: {
-        challenge_id: bowlBtn.dataset.id,
-        line: document.getElementById('pvp-line').value,
-        length: document.getElementById('pvp-len').value,
-        variation: document.getElementById('pvp-var').value,
-        fieldPreset: document.getElementById('pvp-fld').value
-      }
-    });
-    renderChallengeView(container, state, refresh);
+  return () => {
+    if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
   };
 }

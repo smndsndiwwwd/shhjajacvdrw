@@ -30,15 +30,22 @@ export async function renderPlayersScoutView(container, state, navigate, refresh
 
     listEl.innerHTML = results.map(r => `
       <button class="choice-card scout-pick-btn" data-id="${esc(r.discord_id)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <strong style="font-size:0.96rem;color:#fff;">${esc(r.name)}</strong>
-            <span class="badge badge-cyan mono">${esc(r.public_id || r.discord_id)}</span>
-            <span class="badge badge-gold mono">LVL ${r.level}</span>
-            <span class="badge badge-muted">${esc(r.primary_role)}</span>
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <div style="width:38px;height:38px;border-radius:50%;overflow:hidden;border:1.5px solid var(--cyan);background:#0b1120;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:0.8rem;">
+            ${r.avatar_url
+              ? `<img src="${esc(r.avatar_url)}" alt="${esc(r.name)}" style="width:100%;height:100%;object-fit:cover;" />`
+              : esc(String(r.name || 'CA').slice(0, 2).toUpperCase())}
           </div>
-          <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">
-            🌍 ${esc(r.nationality)} • ${esc(r.tier?.name || 'Player')} • Matches: ${r.matches || 0} • Runs: ${r.runs || 0} • Wkts: ${r.wickets || 0}
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong style="font-size:0.96rem;color:#fff;">${esc(r.name)}</strong>
+              <span class="badge badge-cyan mono">${esc(r.public_id || r.discord_id)}</span>
+              <span class="badge badge-gold mono">LVL ${r.level}</span>
+              <span class="badge badge-muted">${esc(r.primary_role)}</span>
+            </div>
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">
+              🌍 ${esc(r.nationality)} • ${esc(r.tier?.name || 'Player')} • Matches: ${r.matches || 0} • Runs: ${r.runs || 0} • Wkts: ${r.wickets || 0}
+            </div>
           </div>
         </div>
         <span class="btn btn-sm btn-primary">Inspect ➡️</span>

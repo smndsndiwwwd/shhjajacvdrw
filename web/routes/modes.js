@@ -8,7 +8,11 @@ import {
   playWebMatchBall,
   forfeitWebMatch,
   clearActiveWebMatch,
-  resolveStoryEventChoice
+  resolveStoryEventChoice,
+  computeTimingProfile,
+  resolveBattingTiming,
+  buildInitialReleaseCue,
+  buildFullDeliveryReveal
 } from '../lib/matchEngine.js';
 import {
   QUICK_MATCH_CONFIG,
@@ -436,6 +440,54 @@ export async function handleModeRoutes(req, res, pathname) {
     });
   }
 
+function enrichChallengeRow(database, row) {
+  if (!row) return null;
+  const state = row.state_json ? JSON.parse(row.state_json) : {};
+  const batter = state.batterId
+    ? database.prepare('SELECT discord_id, public_id, name, batting_hand, confidence, form FROM players WHERE discord_id = ?').get(state.batterId)
+    : null;
+  const bowler = state.bowlerId && state.bowlerId !== 'ai_rival'
+    ? database.prepare('SELECT discord_id, public_id, name, bowling_style FROM players WHERE discord_id = ?').get(state.bowlerId)
+    : { name: 'AI Challenger Bot', public_id: 'AI', bowling_style: 'Right-arm Fast' };
+  const winner = row.winner_id && row.winner_id !== 'ai_rival'
+    ? database.prepare('SELECT name, public_id FROM players WHERE discord_id = ?').get(row.winner_id)
+    : (row.winner_id === 'ai_rival' ? { name: 'AI Challenger Bot', public_id: 'AI' } : null);
+
+  let timingProfile = null;
+  if (batter && row.status === 'active') {
+    const attrs = getEffectiveAttributes(database, batter.discord_id);
+    const eq = getEquipmentBonuses(database, batter.discord_id);
+    const skills = database.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(batter.discord_id).map(r => r.skill_key);
+    let bowlerSkill = 52;
+    if (state.bowlerId && state.bowlerId !== 'ai_rival') {
+      const oppAttrs = getEffectiveAttributes(database, state.bowlerId);
+      bowlerSkill = Math.round(((oppAttrs.accuracy || 25) + (oppAttrs.swing || 25)) / 2);
+    }
+    timingProfile = computeTimingProfile({
+      playerId: batter.discord_id,
+      playerAttrs: attrs,
+      eqBonuses: eq,
+      activeSkills: skills,
+      bowlerSkill,
+      pitch: 'Flat Belter (Batting Paradise)',
+      bat: { balls: state.balls || 0, ballsLimit: 6 },
+      nextDelivery: state.pendingDelivery || {}
+    }, batter);
+  }
+
+  return {
+    ...row,
+    winner_name: winner?.name || null,
+    winner_public_id: winner?.public_id || null,
+    batterHand: batter?.batting_hand || 'Right-hand bat',
+    bowlerStyle: bowler?.bowling_style || 'Right-arm Fast',
+    timingProfile,
+    releaseCue: state.pendingDelivery ? buildInitialReleaseCue(state.pendingDelivery) : null,
+    fullDeliveryReveal: state.pendingDelivery ? buildFullDeliveryReveal(state.pendingDelivery) : null,
+    state
+  };
+}
+
   // ==========================
   // CHALLENGE MODE (PvP DUELS)
   // ==========================
@@ -454,7 +506,7 @@ export async function handleModeRoutes(req, res, pathname) {
       LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
       WHERE c.challenger_id = ? OR c.opponent_id = ?
       ORDER BY c.updated_at DESC LIMIT 20
-    `).all(playerId, playerId).map(c => ({ ...c, state: c.state_json ? JSON.parse(c.state_json) : null }));
+    `).all(playerId, playerId).map(c => enrichChallengeRow(db, c));
 
     const leaderboard = db.prepare(`
       SELECT p.discord_id, p.public_id, p.name, p.level, cs.won, cs.lost, cs.played, cs.runs, cs.wickets
@@ -626,20 +678,27 @@ export async function handleModeRoutes(req, res, pathname) {
       state.log.unshift(`Bowler selected delivery (${fieldPreset} field). Waiting for batter!`);
       const nextExp = Date.now() + ACTIVE_CHALLENGE_TTL_MS;
       db.prepare("UPDATE web_challenges SET state_json = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), nextExp, duel.id);
-      return sendJson(res, 200, { challenge: { ...duel, expires_at: nextExp, state } });
+      const refreshed = db.prepare(`
+        SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
+               COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
+        FROM web_challenges c
+        LEFT JOIN players p1 ON c.challenger_id = p1.discord_id
+        LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
+        WHERE c.id = ?
+      `).get(duel.id);
+      return sendJson(res, 200, { challenge: enrichChallengeRow(db, refreshed) });
     }
 
     if (isBatter) {
       if (!state.pendingDelivery) {
         return sendJson(res, 400, { error: 'Waiting for bowler to select the next delivery!' });
       }
-      const { stance = 'In Line', footwork = 'Front Foot', intent = 'Stroke', zone = 'Cover', timingQuality = null } = body;
+      const { stance = 'In Line', footwork = 'Front Foot', intent = 'Stroke', zone = 'Cover', timingQuality = null, needlePos = null } = body;
       const isLeave = footwork === 'Leave' || intent === 'Leave';
       const deliv = state.pendingDelivery;
       const attrs = getEffectiveAttributes(db, playerId);
       const eq = getEquipmentBonuses(db, playerId);
       const skills = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
-      const timing = isLeave ? 'Perfect' : (timingQuality || (Math.random() < 0.45 ? 'Perfect' : Math.random() < 0.8 ? 'Slightly Early' : 'Very Late'));
       const equippedShot = !isLeave ? getPlayerEquippedShot(playerId, footwork, intent, zone) : null;
 
       let bowlerSkill = 52;
@@ -647,6 +706,21 @@ export async function handleModeRoutes(req, res, pathname) {
         const oppAttrs = getEffectiveAttributes(db, duel.opponent_id);
         bowlerSkill = Math.round(((oppAttrs.accuracy || 25) + (oppAttrs.swing || 25)) / 2);
       }
+
+      const timingProfile = computeTimingProfile({
+        playerId,
+        playerAttrs: attrs,
+        eqBonuses: eq,
+        activeSkills: skills,
+        bowlerSkill,
+        pitch: 'Flat Belter (Batting Paradise)',
+        bat: { balls: state.balls || 0, ballsLimit: 6 },
+        nextDelivery: deliv
+      }, player);
+      const parsedNeedle = (needlePos !== null && needlePos !== undefined && needlePos !== '') ? Number(needlePos) : null;
+      const timing = isLeave
+        ? 'Perfect'
+        : resolveBattingTiming(timingQuality, parsedNeedle, timingProfile, player.confidence, skills, (6 - (state.balls || 0)) <= 2);
 
       const sim = simulateBallAdvanced({
         bowlerInput: deliv,
@@ -670,6 +744,20 @@ export async function handleModeRoutes(req, res, pathname) {
       state.freeHit = Boolean(sim.nextIsFreeHit);
 
       const shotName = isLeave ? 'Leave' : (equippedShot ? equippedShot.name : getDerivedShotName(footwork, intent, zone));
+      state.lastBall = {
+        runs: sim.runs,
+        wicket: Boolean(sim.wicket),
+        rebowl: Boolean(sim.rebowl),
+        timing: sim.timing,
+        shotName,
+        zone: isLeave ? 'In Line' : zone,
+        commentary: sim.commentary,
+        delivery: { ...deliv }
+      };
+      if (!Array.isArray(state.recentBalls)) state.recentBalls = [];
+      state.recentBalls.push(sim.wicket ? 'W' : sim.rebowl ? 'WD' : String(sim.runs));
+      if (state.recentBalls.length > 6) state.recentBalls = state.recentBalls.slice(-6);
+
       state.log.unshift(`Ball ${state.balls}: ${deliv.length} ${deliv.line} ➔ ${shotName} [${sim.timing}] — ${sim.commentary}`);
       state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)') : null;
 
@@ -710,12 +798,29 @@ export async function handleModeRoutes(req, res, pathname) {
           ip
         });
 
-        return sendJson(res, 200, { challenge: { ...duel, status: 'completed', winner_id: winnerId, state } });
+        return sendJson(res, 200, {
+          challenge: enrichChallengeRow(db, db.prepare(`
+            SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
+                   COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
+            FROM web_challenges c
+            LEFT JOIN players p1 ON c.challenger_id = p1.discord_id
+            LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
+            WHERE c.id = ?
+          `).get(duel.id))
+        });
       }
 
       const nextExp = Date.now() + ACTIVE_CHALLENGE_TTL_MS;
       db.prepare("UPDATE web_challenges SET state_json = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(state), nextExp, duel.id);
-      return sendJson(res, 200, { challenge: { ...duel, expires_at: nextExp, state } });
+      const refreshed = db.prepare(`
+        SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
+               COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
+        FROM web_challenges c
+        LEFT JOIN players p1 ON c.challenger_id = p1.discord_id
+        LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
+        WHERE c.id = ?
+      `).get(duel.id);
+      return sendJson(res, 200, { challenge: enrichChallengeRow(db, refreshed) });
     }
   }
 

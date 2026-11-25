@@ -668,6 +668,30 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     return sendJson(res, 200, { query: q, results });
   }
 
+  // Update Player Profile Photo
+  if (pathname === '/api/player/avatar' && req.method === 'POST') {
+    const player = getPlayerOrFail(res, user);
+    if (!player) return true;
+    const body = await parseJsonBody(req);
+    const raw = body.avatar_url == null ? '' : String(body.avatar_url).trim();
+
+    if (raw === '') {
+      db.prepare('UPDATE players SET avatar_url = NULL WHERE discord_id = ?').run(playerId);
+      recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Cleared Profile Photo', ip });
+      return sendJson(res, 200, { ok: true, avatar_url: null });
+    }
+
+    const isSafeDataImg = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i.test(raw) && raw.length <= 360000;
+    const isSafeHttpUrl = /^https?:\/\/[^\s"'<>]{4,400}$/i.test(raw);
+    if (!isSafeDataImg && !isSafeHttpUrl) {
+      return sendJson(res, 400, { error: 'Please upload a valid PNG/JPG/WEBP photo (under 250KB) or provide a valid image URL.' });
+    }
+
+    db.prepare('UPDATE players SET avatar_url = ? WHERE discord_id = ?').run(raw, playerId);
+    recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Updated Profile Photo', ip });
+    return sendJson(res, 200, { ok: true, avatar_url: raw });
+  }
+
   if (pathname === '/api/players/profile' && req.method === 'GET') {
     const identifier = query.get('id') || '';
     const target = resolvePlayerByIdentifier(db, identifier);

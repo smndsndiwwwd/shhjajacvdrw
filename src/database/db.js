@@ -557,9 +557,14 @@ try {
   // Ignore startup sweep errors
 }
 
-// Unique human-readable Player ID (e.g., CA-1001) migration + backfill
+// Unique human-readable Player ID (e.g., CA-1001) + custom avatar_url migration + backfill
 try {
   db.exec("ALTER TABLE players ADD COLUMN public_id TEXT");
+} catch (e) {
+  // Ignore if column already exists
+}
+try {
+  db.exec("ALTER TABLE players ADD COLUMN avatar_url TEXT DEFAULT NULL");
 } catch (e) {
   // Ignore if column already exists
 }
@@ -633,7 +638,7 @@ export function searchPlayersDirectory(database, queryStr = '', limit = 30) {
   const q = String(queryStr || '').trim();
   const rows = database.prepare(`
     SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, p.nationality,
-           p.reputation, p.current_chapter, p.batting_hand, p.bowling_style,
+           p.reputation, p.current_chapter, p.batting_hand, p.bowling_style, p.avatar_url,
            COALESCE(s.matches, 0) as matches, COALESCE(s.runs, 0) as runs, COALESCE(s.wickets, 0) as wickets
     FROM players p
     LEFT JOIN stats s ON s.player_id = p.discord_id

@@ -28,7 +28,7 @@ const ATTR_GROUPS = [
   }
 ];
 
-export function renderDashboardView(container, state, navigate) {
+export function renderDashboardView(container, state, navigate, onRefresh) {
   const { player, tier, requiredXP, baseAttributes, effectiveAttributes, equipmentBonuses, academy, stats, activeContract, tournamentsWon, inventory, achievementsUnlockedCount, achievementsTotal } = state;
   const xpPct = Math.min(100, Math.round((player.xp / Math.max(1, requiredXP)) * 100));
   const equipped = (inventory || []).filter(i => i.equipped);
@@ -130,7 +130,8 @@ export function renderDashboardView(container, state, navigate) {
 
   renderCommonProfileGraphicCard(document.getElementById('dash-graphic-card-host'), state, {
     isSelf: true,
-    onNavigate: navigate
+    onNavigate: navigate,
+    onPhotoUpdated: onRefresh ? () => onRefresh() : null
   });
 
   document.getElementById('dash-go-chapter').onclick = () => navigate('campaign');

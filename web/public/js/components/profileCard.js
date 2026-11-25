@@ -1,4 +1,4 @@
-import { api, esc, openModal, toast } from '../api.js';
+import { api, esc, openModal, closeModal, toast } from '../api.js';
 
 function roundRect(ctx, x, y, w, h, r, fill = null, stroke = null, lw = 1) {
   ctx.beginPath();
@@ -23,7 +23,7 @@ const ROLE_COLORS = {
   'All-Rounder': { bg: 'rgba(245, 158, 11, 0.2)', border: '#fbbf24', text: '#fbbf24' }
 };
 
-function drawProfileToCanvas(canvas, data, logoImg = null) {
+function drawProfileToCanvas(canvas, data, logoImg = null, avatarImg = null) {
   const W = 940;
   const H = 580;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -99,21 +99,29 @@ function drawProfileToCanvas(canvas, data, logoImg = null) {
   ctx.arc(189, 126, 42, 0, Math.PI * 2);
   ctx.closePath();
   ctx.clip();
-  const avGrad = ctx.createLinearGradient(147, 84, 231, 168);
-  avGrad.addColorStop(0, '#0f172a');
-  avGrad.addColorStop(1, '#1e3a8a');
-  ctx.fillStyle = avGrad;
-  ctx.fillRect(147, 84, 84, 84);
-  if (logoImg) {
-    ctx.globalAlpha = 0.25;
-    ctx.drawImage(logoImg, 147, 84, 84, 84);
-    ctx.globalAlpha = 1;
+  if (avatarImg) {
+    // Cover-crop custom player photo cleanly inside the glowing circular emblem
+    const scale = Math.max(84 / avatarImg.width, 84 / avatarImg.height);
+    const dw = avatarImg.width * scale;
+    const dh = avatarImg.height * scale;
+    ctx.drawImage(avatarImg, 189 - dw / 2, 126 - dh / 2, dw, dh);
+  } else {
+    const avGrad = ctx.createLinearGradient(147, 84, 231, 168);
+    avGrad.addColorStop(0, '#0f172a');
+    avGrad.addColorStop(1, '#1e3a8a');
+    ctx.fillStyle = avGrad;
+    ctx.fillRect(147, 84, 84, 84);
+    if (logoImg) {
+      ctx.globalAlpha = 0.25;
+      ctx.drawImage(logoImg, 147, 84, 84, 84);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 28px "Chakra Petch", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(player.name || 'CA').slice(0, 2).toUpperCase(), 189, 127);
   }
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 28px "Chakra Petch", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(player.name || 'CA').slice(0, 2).toUpperCase(), 189, 127);
   ctx.restore();
 
   // Player Name
@@ -278,7 +286,107 @@ function loadBotLogoForCanvas() {
   });
 }
 
-export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, onNavigate = null, onChallenge = null } = {}) {
+function loadPlayerAvatarForCanvas(url) {
+  if (!url) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (!String(url).startsWith('data:')) img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+function openSetProfilePhotoModal(currentUrl, onSaved) {
+  let pendingDataUrl = currentUrl || '';
+  openModal(`
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3>📷 Set Player Profile Photo</h3>
+        <button class="btn btn-sm" id="photo-modal-close">✕</button>
+      </div>
+      <p style="font-size:0.84rem;color:var(--text-muted);margin:0;">
+        Upload any photo from your device (auto-cropped &amp; optimized to 256×256) or paste an image URL to feature on your Profile Graphic Card and Search Directory.
+      </p>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div id="photo-preview-ring" style="width:92px;height:92px;border-radius:50%;overflow:hidden;border:2px solid var(--cyan);background:#0b1120;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          ${pendingDataUrl
+            ? `<img src="${esc(pendingDataUrl)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;" />`
+            : `<span style="color:var(--text-muted);font-size:0.78rem;">No Photo</span>`}
+        </div>
+        <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:10px;">
+          <label class="btn btn-primary btn-sm" style="cursor:pointer;text-align:center;">
+            📁 Choose Photo from Device
+            <input type="file" id="photo-file-input" accept="image/*" style="display:none;" />
+          </label>
+          <input id="photo-url-input" class="input" placeholder="Or paste https://... image URL" value="${pendingDataUrl && !pendingDataUrl.startsWith('data:') ? esc(pendingDataUrl) : ''}" />
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:6px;">
+        <button class="btn btn-danger btn-sm" id="photo-clear-btn">🗑️ Reset to Initials</button>
+        <button class="btn btn-emerald" id="photo-save-btn">✅ Save Profile Photo</button>
+      </div>
+    </div>
+  `);
+
+  const previewRing = document.getElementById('photo-preview-ring');
+  const setPreview = (src) => {
+    pendingDataUrl = src || '';
+    previewRing.innerHTML = src
+      ? `<img src="${esc(src)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;" />`
+      : `<span style="color:var(--text-muted);font-size:0.78rem;">No Photo</span>`;
+  };
+
+  document.getElementById('photo-modal-close').onclick = closeModal;
+  document.getElementById('photo-url-input').oninput = (e) => {
+    const val = e.target.value.trim();
+    if (val.startsWith('http://') || val.startsWith('https://')) setPreview(val);
+  };
+
+  document.getElementById('photo-file-input').onchange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const off = document.createElement('canvas');
+        off.width = 256;
+        off.height = 256;
+        const octx = off.getContext('2d');
+        const sc = Math.max(256 / img.width, 256 / img.height);
+        const dw = img.width * sc;
+        const dh = img.height * sc;
+        octx.drawImage(img, 128 - dw / 2, 128 - dh / 2, dw, dh);
+        const resized = off.toDataURL('image/jpeg', 0.85);
+        document.getElementById('photo-url-input').value = '';
+        setPreview(resized);
+      };
+      img.onerror = () => toast('Could not decode selected image file.', 'error');
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.getElementById('photo-clear-btn').onclick = async () => {
+    await api('/api/player/avatar', { method: 'POST', body: { avatar_url: null } });
+    closeModal();
+    toast('Profile photo reset to initials emblem.', 'info');
+    if (onSaved) await onSaved(null);
+  };
+
+  document.getElementById('photo-save-btn').onclick = async () => {
+    const urlVal = document.getElementById('photo-url-input').value.trim();
+    const toSave = urlVal || pendingDataUrl;
+    if (!toSave) return toast('Choose a photo file or enter an image URL first.', 'error');
+    await api('/api/player/avatar', { method: 'POST', body: { avatar_url: toSave } });
+    closeModal();
+    toast('Profile photo updated!', 'success');
+    if (onSaved) await onSaved(toSave);
+  };
+}
+
+export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, onNavigate = null, onChallenge = null, onPhotoUpdated = null } = {}) {
   const { player = {} } = data || {};
   const publicId = player.public_id || player.discord_id || 'CA-0000';
 
@@ -291,9 +399,10 @@ export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, o
           <span class="badge badge-muted">Includes Career Stats</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${isSelf ? `<button class="btn btn-primary btn-sm card-photo-btn">📷 Set Photo</button>` : ''}
           ${isSelf && onNavigate ? `
             <button class="btn btn-emerald btn-sm card-act-btn" data-act="campaign">🏏 Play Match</button>
-            <button class="btn btn-primary btn-sm card-act-btn" data-act="players">🔍 Scout Players</button>
+            <button class="btn btn-sm card-act-btn" data-act="players">🔍 Scout Players</button>
           ` : ''}
           ${!isSelf && onChallenge ? `
             <button class="btn btn-gold btn-sm card-chal-btn">⚔️ Challenge (${esc(publicId)})</button>
@@ -308,10 +417,26 @@ export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, o
   `;
 
   const canvas = hostEl.querySelector('.profile-graphic-canvas');
-  drawProfileToCanvas(canvas, data, cachedLogoImg);
-  if (!cachedLogoImg) {
-    loadBotLogoForCanvas().then(img => {
-      if (img && document.body.contains(canvas)) drawProfileToCanvas(canvas, data, img);
+  let loadedAvatar = null;
+  drawProfileToCanvas(canvas, data, cachedLogoImg, loadedAvatar);
+
+  Promise.all([
+    cachedLogoImg ? Promise.resolve(cachedLogoImg) : loadBotLogoForCanvas(),
+    loadPlayerAvatarForCanvas(player.avatar_url)
+  ]).then(([logo, av]) => {
+    loadedAvatar = av;
+    if (document.body.contains(canvas)) {
+      drawProfileToCanvas(canvas, data, logo, loadedAvatar);
+    }
+  });
+
+  const photoBtn = hostEl.querySelector('.card-photo-btn');
+  if (photoBtn) {
+    photoBtn.onclick = () => openSetProfilePhotoModal(player.avatar_url, async (newUrl) => {
+      data.player.avatar_url = newUrl;
+      loadedAvatar = await loadPlayerAvatarForCanvas(newUrl);
+      drawProfileToCanvas(canvas, data, cachedLogoImg, loadedAvatar);
+      if (onPhotoUpdated) await onPhotoUpdated(newUrl);
     });
   }
 
