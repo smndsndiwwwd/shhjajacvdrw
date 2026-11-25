@@ -1,4 +1,5 @@
 import { esc } from '../api.js';
+import { renderCommonProfileGraphicCard } from '../components/profileCard.js';
 
 const ATTR_GROUPS = [
   {
@@ -35,37 +36,19 @@ export function renderDashboardView(container, state, navigate) {
 
   container.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:20px;">
-      <!-- Hero Player Card -->
-      <div class="card card-glow-cyan" style="background:linear-gradient(135deg, rgba(14,22,44,0.94), rgba(8,14,28,0.94));">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:18px;">
-          <div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-              <span class="badge badge-cyan">${esc(tier.badge)} • ${esc(tier.name)}</span>
-              <span class="badge badge-gold">Season ${player.season}</span>
-              <span class="badge badge-emerald">Chapter ${Math.min(50, player.current_chapter)}/50</span>
-            </div>
-            <h1 style="font-size:2.1rem;">${esc(player.name)}</h1>
-            <p style="color:var(--text-muted);margin:6px 0 0;font-size:0.92rem;">
-              ${esc(player.primary_role)} • ${esc(player.batting_hand)} • ${esc(player.bowling_style)} • 🌍 ${esc(player.nationality)}
-            </p>
-            <p style="color:var(--cyan);margin:4px 0 0;font-size:0.84rem;">
-              🎓 ${esc(academy?.name || player.academy_id)} &nbsp;|&nbsp; 🏆 Tournaments Won: <strong>${totalTourneyWins}</strong> &nbsp;|&nbsp; 👑 Franchise Titles: <strong>${player.franchise_titles || 0}</strong>
-            </p>
-          </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn btn-emerald" id="dash-go-chapter">🏏 Play Chapter Match</button>
-            <button class="btn btn-primary" id="dash-go-train">🏋️ Train</button>
-            <button class="btn btn-gold" id="dash-go-franchise">🏟️ Franchise</button>
-          </div>
-        </div>
+      <!-- Common Graphic Profile Image Card (with Stats & Unique ID) -->
+      <div id="dash-graphic-card-host"></div>
 
-        <!-- Level & XP Bar -->
-        <div style="margin-top:18px;">
-          <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:6px;">
-            <span class="mono">LEVEL <strong>${player.level}</strong></span>
-            <span class="mono" style="color:var(--text-muted);">${player.xp} / ${requiredXP} XP (${xpPct}%)</span>
-          </div>
-          <div class="progress-track"><div class="progress-fill" style="width:${xpPct}%"></div></div>
+      <!-- Quick Action Strip -->
+      <div class="card" style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div style="font-size:0.86rem;color:var(--text-muted);">
+          <strong style="color:#fff;">ID: ${esc(player.public_id || player.discord_id)}</strong> • ${esc(tier.badge)} ${esc(tier.name)} • Level ${player.level} (${xpPct}% XP)
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-emerald" id="dash-go-chapter">🏏 Play Chapter Match</button>
+          <button class="btn btn-primary" id="dash-go-train">🏋️ Train</button>
+          <button class="btn btn-gold" id="dash-go-franchise">🏟️ Franchise</button>
+          <button class="btn" id="dash-go-scout">🔍 Find Other Players</button>
         </div>
       </div>
 
@@ -145,8 +128,14 @@ export function renderDashboardView(container, state, navigate) {
     </div>
   `;
 
+  renderCommonProfileGraphicCard(document.getElementById('dash-graphic-card-host'), state, {
+    isSelf: true,
+    onNavigate: navigate
+  });
+
   document.getElementById('dash-go-chapter').onclick = () => navigate('campaign');
   document.getElementById('dash-go-train').onclick = () => navigate('training');
   document.getElementById('dash-go-franchise').onclick = () => navigate('franchise');
+  document.getElementById('dash-go-scout').onclick = () => navigate('players');
   document.getElementById('dash-go-locker').onclick = () => navigate('locker');
 }

@@ -10,6 +10,7 @@ import {
   renderChallengeView
 } from './views/modes.js';
 import { renderTrainingView, renderLockerView, renderClubAndStatsView } from './views/hubs.js';
+import { renderPlayersScoutView } from './views/players.js';
 import { renderAdminView } from './views/admin.js';
 
 const appRoot = document.getElementById('app');
@@ -84,6 +85,7 @@ async function renderShell() {
       { id: 'tournaments', icon: '🏆', label: 'Tournaments & Cups' },
       { id: 'franchise', icon: '🏟️', label: 'Franchise Leagues' },
       { id: 'challenge', icon: '⚔️', label: 'Challenge PvP' },
+      { id: 'players', icon: '🔍', label: 'Scout Players' },
       { section: 'Development' },
       { id: 'training', icon: '🏋️', label: 'Train, Skills & Academy' },
       { id: 'locker', icon: '🎒', label: 'Shop, Locker & ShotMap' },
@@ -141,11 +143,12 @@ async function renderShell() {
             ${hasPlayer ? `
               <div class="hud-chip">⚡ <strong>${state.player.energy}</strong>/100</div>
               <div class="hud-chip">🪙 <strong>${state.player.coins.toLocaleString()}</strong></div>
-              <div class="hud-chip">🎟️ <strong>${state.player.training_tokens}</strong></div>
               <div class="hud-chip">🌟 LVL <strong>${state.player.level}</strong></div>
+              <div class="hud-chip mono">🪪 <strong>${esc(state.player.public_id || state.player.discord_id)}</strong></div>
             ` : `<div class="hud-chip">👋 Welcome <strong>${esc(state.user.username)}</strong></div>`}
           </div>
           <div class="hud-actions">
+            ${hasPlayer && state.route !== 'players' ? `<button class="btn btn-sm" id="hud-scout-players">🔍 Find Players</button>` : ''}
             ${state.activeMatch && state.route !== 'match' ? `<button class="btn btn-emerald btn-sm" id="hud-resume-match">🔴 Resume Live Match</button>` : ''}
             ${isAdmin && state.route !== 'admin' ? `<button class="btn btn-danger btn-sm" id="hud-go-admin">🛡️ Admin Logs</button>` : ''}
           </div>
@@ -188,6 +191,9 @@ async function renderShell() {
   const resBtn = document.getElementById('hud-resume-match');
   if (resBtn) resBtn.onclick = () => navigate('match');
 
+  const scoutHudBtn = document.getElementById('hud-scout-players');
+  if (scoutHudBtn) scoutHudBtn.onclick = () => navigate('players');
+
   const admBtn = document.getElementById('hud-go-admin');
   if (admBtn) admBtn.onclick = () => navigate('admin');
 
@@ -221,6 +227,8 @@ async function renderShell() {
       await renderFranchiseView(viewRoot, state, launchMatch, refreshBootstrap);
     } else if (state.route === 'challenge' && hasPlayer) {
       await renderChallengeView(viewRoot, state, refreshBootstrap);
+    } else if (state.route === 'players' && (hasPlayer || isAdmin)) {
+      await renderPlayersScoutView(viewRoot, state, navigate, refreshBootstrap);
     } else if (state.route === 'training' && hasPlayer) {
       await renderTrainingView(viewRoot, state, refreshBootstrap);
     } else if (state.route === 'locker' && hasPlayer) {

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import db from '../../src/database/db.js';
+import db, { resolvePlayerByIdentifier } from '../../src/database/db.js';
 import { getAuthUser, hashPassword } from '../lib/auth.js';
 import { sendJson, parseJsonBody, getClientIp } from '../lib/http.js';
 import { addXP } from '../../src/game/utils.js';
@@ -71,13 +71,13 @@ export async function handleAdminRoutes(req, res, pathname, query) {
   if (pathname === '/api/admin/users' && req.method === 'GET') {
     const webUsers = db.prepare(`
       SELECT u.id, u.username, u.role, u.player_id, u.created_at, u.last_login,
-             p.name as player_name, p.level, p.coins, p.energy, p.reputation, p.current_chapter, p.primary_role
+             p.public_id, p.name as player_name, p.level, p.coins, p.energy, p.reputation, p.current_chapter, p.primary_role
       FROM web_users u
       LEFT JOIN players p ON u.player_id = p.discord_id
       ORDER BY u.id DESC
     `).all();
     const allPlayers = db.prepare(`
-      SELECT discord_id, name, level, xp, coins, training_tokens, energy, confidence, form, reputation, skill_points, current_chapter, primary_role, created_at
+      SELECT discord_id, public_id, name, level, xp, coins, training_tokens, energy, confidence, form, reputation, skill_points, current_chapter, primary_role, created_at
       FROM players ORDER BY level DESC, created_at DESC LIMIT 200
     `).all();
     return sendJson(res, 200, { webUsers, allPlayers });
@@ -157,11 +157,13 @@ export async function handleAdminRoutes(req, res, pathname, query) {
   // 4. Resource Grants (Admin & Owner Give)
   if (pathname === '/api/admin/give' && req.method === 'POST') {
     const body = await parseJsonBody(req);
-    const targetPlayerId = String(body.player_id || '');
+    const rawTarget = String(body.player_id || '');
     const type = String(body.type || '');
     const amount = Number(body.amount);
 
-    const targetPlayer = db.prepare('SELECT name FROM players WHERE discord_id = ?').get(targetPlayerId);
+    const resolvedPlayer = resolvePlayerByIdentifier(db, rawTarget);
+    const targetPlayerId = resolvedPlayer ? resolvedPlayer.discord_id : rawTarget;
+    const targetPlayer = resolvedPlayer || db.prepare('SELECT name FROM players WHERE discord_id = ?').get(targetPlayerId);
     if (!targetPlayer) return sendJson(res, 404, { error: 'Target career player not found.' });
     if (isNaN(amount)) return sendJson(res, 400, { error: 'Amount must be a number.' });
 

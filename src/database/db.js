@@ -545,4 +545,133 @@ db.exec(`
   );
 `);
 
+// Unique human-readable Player ID (e.g., CA-1001) migration + backfill
+try {
+  db.exec("ALTER TABLE players ADD COLUMN public_id TEXT");
+} catch (e) {
+  // Ignore if column already exists
+}
+try {
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_public_id ON players(public_id)");
+} catch (e) {
+  // Ignore if index creation conflicts temporarily
+}
+
+export function generateUniquePublicId(database = db) {
+  const rows = database.prepare("SELECT public_id FROM players WHERE public_id IS NOT NULL AND public_id != ''").all();
+  let maxNum = 1000;
+  const used = new Set();
+  for (const r of rows) {
+    const up = String(r.public_id).toUpperCase();
+    used.add(up);
+    const m = up.match(/^CA-(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  let candidate = `CA-${maxNum + 1}`;
+  while (used.has(candidate)) {
+    maxNum++;
+    candidate = `CA-${maxNum + 1}`;
+  }
+  return candidate;
+}
+
+// Backfill any existing players missing a unique public_id
+try {
+  const missing = db.prepare("SELECT discord_id FROM players WHERE public_id IS NULL OR public_id = '' ORDER BY rowid ASC").all();
+  if (missing.length > 0) {
+    const upd = db.prepare("UPDATE players SET public_id = ? WHERE discord_id = ?");
+    for (const row of missing) {
+      upd.run(generateUniquePublicId(db), row.discord_id);
+    }
+  }
+} catch (e) {
+  console.error('Error backfilling public_id:', e);
+}
+
+export function resolvePlayerByIdentifier(database, identifier) {
+  const raw = String(identifier || '').trim();
+  if (!raw) return null;
+  const cleanedTag = raw.replace(/^#/, '').toUpperCase();
+  return database.prepare(
+    "SELECT * FROM players WHERE discord_id = ? OR UPPER(public_id) = ?"
+  ).get(raw, cleanedTag) || null;
+}
+
+function editDistance(a, b) {
+  const la = a.length;
+  const lb = b.length;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  const dp = Array.from({ length: la + 1 }, () => new Array(lb + 1).fill(0));
+  for (let i = 0; i <= la; i++) dp[i][0] = i;
+  for (let j = 0; j <= lb; j++) dp[0][j] = j;
+  for (let i = 1; i <= la; i++) {
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[la][lb];
+}
+
+export function searchPlayersDirectory(database, queryStr = '', limit = 30) {
+  const q = String(queryStr || '').trim();
+  const rows = database.prepare(`
+    SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, p.nationality,
+           p.reputation, p.current_chapter, p.batting_hand, p.bowling_style,
+           COALESCE(s.matches, 0) as matches, COALESCE(s.runs, 0) as runs, COALESCE(s.wickets, 0) as wickets
+    FROM players p
+    LEFT JOIN stats s ON s.player_id = p.discord_id
+    ORDER BY p.level DESC, p.reputation DESC
+  `).all();
+
+  if (!q) return rows.slice(0, limit).map(r => ({ ...r, matchScore: 100 }));
+
+  const qLower = q.toLowerCase();
+  const qTag = q.replace(/^#/, '').toUpperCase();
+  const qTokens = qLower.split(/\s+/).filter(Boolean);
+
+  const scored = [];
+  for (const r of rows) {
+    const nameLower = String(r.name || '').toLowerCase();
+    const pid = String(r.public_id || '').toUpperCase();
+    const did = String(r.discord_id || '').toLowerCase();
+    let score = 0;
+
+    if (pid === qTag || did === qLower) score = 200;
+    else if (pid.includes(qTag) && qTag.length >= 2) score = 160;
+    else if (nameLower === qLower) score = 180;
+    else if (nameLower.startsWith(qLower)) score = 150;
+    else if (nameLower.includes(qLower)) score = 125;
+    else {
+      // Token + fuzzy similarity match for similar names
+      const words = nameLower.split(/\s+/).filter(Boolean);
+      let bestSim = 0;
+      const distWhole = editDistance(qLower, nameLower.slice(0, Math.max(qLower.length + 2, nameLower.length)));
+      const maxLenWhole = Math.max(qLower.length, nameLower.length, 1);
+      bestSim = Math.max(bestSim, 1 - distWhole / maxLenWhole);
+
+      for (const tok of qTokens) {
+        if (nameLower.includes(tok)) bestSim = Math.max(bestSim, 0.8);
+        for (const w of words) {
+          const d = editDistance(tok, w);
+          const sim = 1 - d / Math.max(tok.length, w.length, 1);
+          if (sim > bestSim) bestSim = sim;
+        }
+      }
+      if (bestSim >= 0.42) score = Math.round(bestSim * 100);
+    }
+
+    if (score > 0) {
+      scored.push({ ...r, matchScore: score });
+    }
+  }
+
+  scored.sort((a, b) => b.matchScore - a.matchScore || b.level - a.level || a.name.localeCompare(b.name));
+  return scored.slice(0, limit);
+}
+
 export default db;

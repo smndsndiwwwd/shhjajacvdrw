@@ -228,9 +228,9 @@ export async function renderAdminView(container, state, refresh) {
               <h3>🎁 Admin / Owner Resource Grant</h3>
               <form id="admin-give-form" style="display:flex;flex-direction:column;gap:10px;margin-top:12px;">
                 <div>
-                  <label class="label">Select Player</label>
+                  <label class="label">Select Player (Identified by Name + Unique ID + Level)</label>
                   <select id="give-player" class="select" required>
-                    ${usersData.allPlayers.map(p => `<option value="${esc(p.discord_id)}">${esc(p.name)} (LVL ${p.level} • ${p.coins}c)</option>`).join('')}
+                    ${usersData.allPlayers.map(p => `<option value="${esc(p.discord_id)}">${esc(p.name)} [${esc(p.public_id || p.discord_id)}] • LVL ${p.level} • ${p.coins}c</option>`).join('')}
                   </select>
                 </div>
                 <div class="grid-2">
@@ -288,7 +288,7 @@ export async function renderAdminView(container, state, refresh) {
                     <tr>
                       <td><strong>${esc(u.username)}</strong></td>
                       <td><span class="badge ${u.role === 'admin' ? 'badge-crimson' : 'badge-cyan'}">${esc(u.role)}</span></td>
-                      <td>${esc(u.player_name || 'No Career')}</td>
+                      <td>${u.player_name ? `${esc(u.player_name)} <span class="badge badge-muted mono">${esc(u.public_id || u.player_id)}</span>` : 'No Career'}</td>
                       <td class="mono">${u.level ? `LVL ${u.level} • ${u.coins}c` : '—'}</td>
                       <td class="mono" style="font-size:0.74rem;">${esc(u.last_login || 'Never')}</td>
                       <td style="display:flex;gap:6px;">

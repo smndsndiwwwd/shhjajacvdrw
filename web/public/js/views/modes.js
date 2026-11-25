@@ -1,5 +1,6 @@
 import { api, esc, formatRichText, toast, openModal, closeModal } from '../api.js';
 import { renderFieldRadarSVG } from '../components/radar.js';
+import { openPlayerProfileModal } from '../components/profileCard.js';
 
 // ==========================================
 // 1. CAREER CHAPTERS & PRACTICE VIEW
@@ -449,10 +450,12 @@ export async function renderChallengeView(container, state, refresh) {
           <p style="color:var(--text-muted);font-size:0.85rem;margin:6px 0 14px;">Challenge another registered player online or take on the AI Challenger Bot in a 6-ball shootout!</p>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <div>
+              <label class="label">Filter Rival (Name, Similar Name, or Unique ID)</label>
+              <input id="chal-opp-filter" class="input" placeholder="Filter by name or ID (e.g. CA-1002)..." style="margin-bottom:8px;" />
               <label class="label">Select Opponent</label>
               <select id="chal-opp" class="select">
                 <option value="ai_rival">🤖 AI Challenger Bot (Instant Play)</option>
-                ${hub.rivals.map(r => `<option value="${r.discord_id}">${esc(r.name)} (LVL ${r.level} • ${esc(r.primary_role)})</option>`).join('')}
+                ${hub.rivals.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('')}
               </select>
             </div>
             <div>
@@ -476,7 +479,7 @@ export async function renderChallengeView(container, state, refresh) {
             ${hub.challenges.map(c => `
               <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;background:rgba(6,10,22,0.75);font-size:0.82rem;">
                 <div>
-                  <strong>${esc(c.challenger_name)} vs ${esc(c.opponent_name)}</strong>
+                  <strong>${esc(c.challenger_name)} ${c.challenger_public_id ? `[${esc(c.challenger_public_id)}]` : ''} vs ${esc(c.opponent_name)} ${c.opponent_public_id ? `[${esc(c.opponent_public_id)}]` : ''}</strong>
                   <span class="badge badge-muted">${esc(c.status)}</span>
                 </div>
                 ${c.status === 'pending' && c.opponent_id === state.player.discord_id ? `
@@ -495,17 +498,19 @@ export async function renderChallengeView(container, state, refresh) {
         <h3 style="margin-bottom:10px;">🏆 Global PvP Challenge Leaderboard</h3>
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Rank</th><th>Player</th><th>Level</th><th>Played</th><th>Wins</th><th>Runs</th><th>Wickets</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Player</th><th>ID</th><th>Level</th><th>Played</th><th>Wins</th><th>Runs</th><th>Wickets</th><th></th></tr></thead>
             <tbody>
               ${hub.leaderboard.map((r, i) => `
                 <tr>
                   <td class="mono">#${i + 1}</td>
                   <td><strong>${esc(r.name)}</strong></td>
-                  <td class="mono">${r.level}</td>
+                  <td class="mono"><span class="badge badge-cyan">${esc(r.public_id || r.discord_id)}</span></td>
+                  <td class="mono">LVL ${r.level}</td>
                   <td class="mono">${r.played}</td>
                   <td class="mono" style="color:var(--emerald);">${r.won}</td>
                   <td class="mono">${r.runs}</td>
                   <td class="mono">${r.wickets}</td>
+                  <td><button class="btn btn-sm pvp-view-prof" data-id="${esc(r.discord_id)}">👤 Card</button></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -514,6 +519,25 @@ export async function renderChallengeView(container, state, refresh) {
       </div>
     </div>
   `;
+
+  const oppFilter = document.getElementById('chal-opp-filter');
+  const oppSel = document.getElementById('chal-opp');
+  if (oppFilter && oppSel) {
+    oppFilter.oninput = () => {
+      const q = oppFilter.value.trim().toLowerCase();
+      const filtered = hub.rivals.filter(r =>
+        !q ||
+        String(r.name || '').toLowerCase().includes(q) ||
+        String(r.public_id || r.discord_id || '').toLowerCase().includes(q) ||
+        String(r.primary_role || '').toLowerCase().includes(q)
+      );
+      oppSel.innerHTML = `<option value="ai_rival">🤖 AI Challenger Bot (Instant Play)</option>` +
+        filtered.map(r => `<option value="${esc(r.discord_id)}">${esc(r.name)} [${esc(r.public_id || r.discord_id)}] • LVL ${r.level} • ${esc(r.primary_role)}</option>`).join('');
+    };
+  }
+  document.querySelectorAll('.pvp-view-prof').forEach(b => b.onclick = () => {
+    openPlayerProfileModal(b.dataset.id, state.player.discord_id);
+  });
 
   document.getElementById('btn-create-chal').onclick = async () => {
     const opponent_id = document.getElementById('chal-opp').value;

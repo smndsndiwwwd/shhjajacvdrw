@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import db from '../../src/database/db.js';
+import db, { resolvePlayerByIdentifier } from '../../src/database/db.js';
 import { getAuthUser } from '../lib/auth.js';
 import { sendJson, parseJsonBody, getClientIp } from '../lib/http.js';
 import {
@@ -376,9 +376,10 @@ export async function handleModeRoutes(req, res, pathname) {
     if (!player) return true;
 
     const myStats = db.prepare('SELECT * FROM challenge_stats WHERE player_id = ?').get(playerId) || { played: 0, won: 0, lost: 0, runs: 0, wickets: 0, fours: 0, sixes: 0 };
-    const rivals = db.prepare('SELECT discord_id, name, level, primary_role FROM players WHERE discord_id != ? ORDER BY level DESC LIMIT 30').all(playerId);
+    const rivals = db.prepare('SELECT discord_id, public_id, name, level, primary_role, nationality FROM players WHERE discord_id != ? ORDER BY level DESC LIMIT 50').all(playerId);
     const challenges = db.prepare(`
-      SELECT c.*, p1.name as challenger_name, COALESCE(p2.name, 'AI Challenger Bot') as opponent_name
+      SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
+             COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
       FROM web_challenges c
       LEFT JOIN players p1 ON c.challenger_id = p1.discord_id
       LEFT JOIN players p2 ON c.opponent_id = p2.discord_id
@@ -387,7 +388,7 @@ export async function handleModeRoutes(req, res, pathname) {
     `).all(playerId, playerId).map(c => ({ ...c, state: c.state_json ? JSON.parse(c.state_json) : null }));
 
     const leaderboard = db.prepare(`
-      SELECT p.discord_id, p.name, p.level, cs.won, cs.lost, cs.played, cs.runs, cs.wickets
+      SELECT p.discord_id, p.public_id, p.name, p.level, cs.won, cs.lost, cs.played, cs.runs, cs.wickets
       FROM challenge_stats cs JOIN players p ON cs.player_id = p.discord_id
       ORDER BY cs.won DESC, cs.runs DESC LIMIT 20
     `).all();
@@ -399,14 +400,15 @@ export async function handleModeRoutes(req, res, pathname) {
     const player = getPlayer(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
-    const opponentId = String(body.opponent_id || 'ai_rival');
+    let opponentId = String(body.opponent_id || 'ai_rival').trim();
     const targetRuns = Math.min(36, Math.max(6, Number(body.target_runs) || 15));
     const isAi = opponentId === 'ai_rival';
 
     if (!isAi) {
-      if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
-      const opp = db.prepare('SELECT discord_id, name FROM players WHERE discord_id = ?').get(opponentId);
+      const opp = resolvePlayerByIdentifier(db, opponentId);
       if (!opp) return sendJson(res, 404, { error: 'Opponent not found.' });
+      opponentId = opp.discord_id;
+      if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
     }
 
     const id = `duel_${crypto.randomBytes(5).toString('hex')}`;

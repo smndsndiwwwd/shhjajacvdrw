@@ -1,4 +1,8 @@
-import db from '../../src/database/db.js';
+import db, {
+  generateUniquePublicId,
+  resolvePlayerByIdentifier,
+  searchPlayersDirectory
+} from '../../src/database/db.js';
 import { getAuthUser } from '../lib/auth.js';
 import { sendJson, parseJsonBody, getClientIp } from '../lib/http.js';
 import { getPlayerTier, generateStartingAttributes } from '../lib/helpers.js';
@@ -76,6 +80,16 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const equipmentBonuses = getEquipmentBonuses(db, playerId);
     const unlockedSkills = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
     const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
+    const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(playerId)?.c || 0;
+    const dismissals = Math.max(1, (stats.matches || 0) - notOuts);
+    const bestBowl = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(playerId);
+    const computedStats = {
+      battingAvg: stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00',
+      strikeRate: stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00',
+      economy: stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00',
+      bowlingAvg: stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00',
+      bestBowling: bestBowl ? `${bestBowl.wickets}/${bestBowl.runs_conceded}` : 'N/A'
+    };
     const settings = getPlayerSettings(playerId);
     const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
     const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(playerId);
@@ -99,6 +113,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       equipmentBonuses,
       unlockedSkills,
       stats,
+      computedStats,
       settings,
       academy,
       activeContract,
@@ -166,10 +181,11 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     loadAcademies();
 
     const now = Date.now();
+    const publicId = generateUniquePublicId(db);
     db.prepare(`
-      INSERT INTO players (discord_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(playerId, name, battingHand, bowlingStyle, primaryRole, nationality, academyId, now);
+      INSERT INTO players (discord_id, public_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(playerId, publicId, name, battingHand, bowlingStyle, primaryRole, nationality, academyId, now);
 
     const attrs = generateStartingAttributes(primaryRole, bowlingStyle);
     db.prepare(`
@@ -642,35 +658,97 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     });
   }
 
+  // Player Search & Public Profile Inspection (by Name, Similar Name, or Unique Player ID)
+  if (pathname === '/api/players/search' && req.method === 'GET') {
+    const q = query.get('q') || '';
+    const results = searchPlayersDirectory(db, q, 30).map(r => ({
+      ...r,
+      tier: getPlayerTier(r.level)
+    }));
+    return sendJson(res, 200, { query: q, results });
+  }
+
+  if (pathname === '/api/players/profile' && req.method === 'GET') {
+    const identifier = query.get('id') || '';
+    const target = resolvePlayerByIdentifier(db, identifier);
+    if (!target) return sendJson(res, 404, { error: 'Player profile not found.' });
+
+    const tid = target.discord_id;
+    const tier = getPlayerTier(target.level);
+    const reqXP = getLevelRequiredXP(target.level);
+    const baseAttributes = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(tid) || {};
+    const effectiveAttributes = getEffectiveAttributes(db, tid);
+    const equipmentBonuses = getEquipmentBonuses(db, tid);
+    const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(tid) || {};
+    const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(tid)?.c || 0;
+    const dismissals = Math.max(1, (stats.matches || 0) - notOuts);
+    const bestBowl = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(tid);
+    const computedStats = {
+      battingAvg: stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00',
+      strikeRate: stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00',
+      economy: stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00',
+      bowlingAvg: stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00',
+      bestBowling: bestBowl ? `${bestBowl.wickets}/${bestBowl.runs_conceded}` : 'N/A'
+    };
+    const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(tid);
+    const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(tid);
+    const inventory = db.prepare('SELECT * FROM inventory WHERE player_id = ? AND equipped = 1').all(tid).map(i => ({
+      ...i,
+      bonuses: JSON.parse(i.bonuses || '{}')
+    }));
+    const recentMatches = db.prepare('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 12').all(tid);
+    loadAcademies();
+    const academy = academies[target.academy_id] || db.prepare('SELECT * FROM academies WHERE id = ?').get(target.academy_id) || null;
+    const achList = getPlayerAchievements(db, tid);
+
+    return sendJson(res, 200, {
+      player: target,
+      tier,
+      requiredXP: reqXP,
+      baseAttributes,
+      effectiveAttributes,
+      equipmentBonuses,
+      stats,
+      computedStats,
+      academy,
+      activeContract,
+      tournamentsWon,
+      inventory,
+      recentMatches,
+      achievementsUnlockedCount: achList.filter(a => a.unlocked).length,
+      achievementsTotal: achList.length
+    });
+  }
+
   if (pathname === '/api/leaderboard' && req.method === 'GET') {
     const type = query.get('type') || 'level';
     let rows = [];
     if (type === 'runs') {
       rows = db.prepare(`
-        SELECT p.discord_id, p.name, p.level, p.primary_role, s.runs as score, s.matches
+        SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, s.runs as score, s.matches
         FROM stats s JOIN players p ON s.player_id = p.discord_id
         ORDER BY s.runs DESC LIMIT 25
       `).all();
     } else if (type === 'wickets') {
       rows = db.prepare(`
-        SELECT p.discord_id, p.name, p.level, p.primary_role, s.wickets as score, s.matches
+        SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, s.wickets as score, s.matches
         FROM stats s JOIN players p ON s.player_id = p.discord_id
         ORDER BY s.wickets DESC LIMIT 25
       `).all();
     } else if (type === 'coins') {
       rows = db.prepare(`
-        SELECT discord_id, name, level, primary_role, coins as score
+        SELECT discord_id, public_id, name, level, primary_role, coins as score
         FROM players ORDER BY coins DESC LIMIT 25
       `).all();
     } else if (type === 'pvp') {
       rows = db.prepare(`
-        SELECT p.discord_id, p.name, p.level, cs.won as score, cs.played, cs.runs
+        SELECT p.discord_id, p.public_id, p.name, p.level, cs.won as score, cs.played, cs.runs
         FROM challenge_stats cs JOIN players p ON cs.player_id = p.discord_id
         ORDER BY cs.won DESC, cs.runs DESC LIMIT 25
       `).all();
     } else {
       rows = db.prepare(`
-        SELECT discord_id, name, level, xp, primary_role, level as score
+        SELECT discord_id, public_id, name, level, xp, primary_role, level as score
         FROM players ORDER BY level DESC, xp DESC LIMIT 25
       `).all();
     }

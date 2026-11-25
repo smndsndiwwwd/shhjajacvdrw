@@ -1,5 +1,6 @@
 import { api, esc, toast, openModal, closeModal } from '../api.js';
 import { renderGearIconSVG } from '../components/gearSvg.js';
+import { openPlayerProfileModal } from '../components/profileCard.js';
 
 // ==========================================
 // 1. TRAINING, ACADEMIES & SKILL TREE
@@ -521,15 +522,17 @@ export async function renderClubAndStatsView(container, state, refresh) {
             </div>
             <div class="table-wrap">
               <table class="data-table">
-                <thead><tr><th>#</th><th>Player</th><th>Role</th><th>Level</th><th>Score</th></tr></thead>
+                <thead><tr><th>#</th><th>Player</th><th>ID</th><th>Role</th><th>Level</th><th>Score</th><th></th></tr></thead>
                 <tbody>
                   ${lbData.rows.map((r, idx) => `
                     <tr>
                       <td class="mono">#${idx + 1}</td>
                       <td><strong>${esc(r.name)}</strong></td>
+                      <td class="mono"><span class="badge badge-cyan">${esc(r.public_id || r.discord_id)}</span></td>
                       <td>${esc(r.primary_role || 'PvP')}</td>
-                      <td class="mono">${r.level}</td>
+                      <td class="mono">LVL ${r.level}</td>
                       <td class="mono" style="color:var(--gold);">${Number(r.score).toLocaleString()}</td>
+                      <td><button class="btn btn-sm inspect-lb-player" data-id="${esc(r.discord_id)}">👤 View</button></td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -622,6 +625,9 @@ export async function renderClubAndStatsView(container, state, refresh) {
       const d = await api(`/api/leaderboard?type=${lbType}`);
       lbData.rows = d.rows;
       paint();
+    });
+    document.querySelectorAll('.inspect-lb-player').forEach(b => b.onclick = () => {
+      openPlayerProfileModal(b.dataset.id, state.player.discord_id);
     });
 
     const reqOffersBtn = document.getElementById('btn-req-offers');

@@ -9,7 +9,7 @@ import {
   TextInputBuilder,
   TextInputStyle
 } from 'discord.js';
-import db from '../database/db.js';
+import db, { generateUniquePublicId } from '../database/db.js';
 import { academies } from '../game/academies.js';
 import { generateAcademiesForNation } from '../game/nationAcademies.js';
 import { addXP, getLevelRequiredXP, updateAndGetEnergy, getEquipmentBonuses, getEffectiveAttributes } from '../game/utils.js';
@@ -470,10 +470,11 @@ export async function finalizeCareerCreation(interaction, discordId, selectedAca
 
   // Create player and associated tables
   const now = Date.now();
+  const publicId = generateUniquePublicId(db);
   db.prepare(`
-    INSERT INTO players (discord_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(discordId, session.name, session.batting_hand, session.bowling_style, session.primary_role, session.nationality, selectedAcademyId, now);
+    INSERT INTO players (discord_id, public_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(discordId, publicId, session.name, session.batting_hand, session.bowling_style, session.primary_role, session.nationality, selectedAcademyId, now);
 
   const startingAttrs = generateStartingAttributes(session.primary_role, session.bowling_style);
   db.prepare(`
@@ -854,7 +855,7 @@ export async function handleProfile(interaction) {
       ctx.fillStyle = '#fbbf24';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('CRICKET ASCEND OFFICIAL CAREER PROFILE • VIRTUAL CM 2.0', 420, 40);
+      ctx.fillText(`CRICKET ASCEND OFFICIAL CAREER PROFILE • PLAYER ID: ${player.public_id || discordId}`, 420, 40);
 
       // 2. Left Panel: Bio card
       drawRoundRect(ctx, 30, 60, 320, 530, 16, 'rgba(13, 20, 38, 0.9)', 'rgba(56, 189, 248, 0.35)', 1.5);
@@ -1001,63 +1002,60 @@ export async function handleProfile(interaction) {
       drawResourceBox(523, 128, 'SKILL POINTS', `${player.skill_points} SP`, 'Perk Unlocks', '#c084fc');
       drawResourceBox(661, 129, 'TRAIN TICKETS', `${player.training_tokens} Tix`, 'Daily Drills', '#34d399');
 
+      // Section: Career Stats Summary Bar (on common graphic card)
+      const pStats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(discordId) || {};
+      const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(discordId)?.c || 0;
+      const dism = Math.max(1, (pStats.matches || 0) - notOuts);
+      const bAvg = (pStats.matches || 0) > 0 ? ((pStats.runs || 0) / dism).toFixed(1) : '0.0';
+      const bSr = (pStats.balls || 0) > 0 ? (((pStats.runs || 0) / pStats.balls) * 100).toFixed(1) : '0.0';
+      const bEcon = (pStats.overs || 0) > 0 ? ((pStats.runs_conceded || 0) / pStats.overs).toFixed(2) : '0.00';
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('// CAREER STATS', 385, 376);
+      drawRoundRect(ctx, 385, 384, 405, 42, 8, 'rgba(30, 41, 59, 0.7)', 'rgba(56, 189, 248, 0.3)', 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11.5px sans-serif';
+      ctx.fillText(`M: ${pStats.matches || 0}   Runs: ${pStats.runs || 0} (Avg ${bAvg} | SR ${bSr})   Wkts: ${pStats.wickets || 0} (Econ ${bEcon})`, 398, 410);
+
       // Section: Contract
       ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillText('// ACTIVE CLUB CONTRACT', 385, 380);
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('// ACTIVE CLUB CONTRACT', 385, 444);
 
-      drawRoundRect(ctx, 385, 394, 405, 78, 10, 'rgba(30, 41, 59, 0.65)', 'rgba(56, 189, 248, 0.25)', 1);
+      drawRoundRect(ctx, 385, 452, 405, 52, 10, 'rgba(30, 41, 59, 0.65)', 'rgba(56, 189, 248, 0.25)', 1);
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 14px sans-serif';
+      ctx.font = 'bold 13px sans-serif';
       if (contract) {
-        ctx.fillText(`${contract.club_name}`, 402, 420);
-        drawRoundRect(ctx, 640, 405, 135, 22, 11, 'rgba(56, 189, 248, 0.15)', '#38bdf8', 1);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(contract.contract_type, 707, 420);
-
-        ctx.textAlign = 'left';
+        ctx.fillText(`${contract.club_name} (${contract.contract_type})`, 400, 474);
         ctx.fillStyle = '#fbbf24';
-        ctx.font = 'bold 12.5px sans-serif';
-        ctx.fillText(`Match Salary: ${contract.salary_per_match} Coins / fixture`, 402, 442);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(`Contract Duration: ${contract.remaining_seasons} Season(s) Guaranteed`, 402, 460);
+        ctx.font = 'bold 11.5px sans-serif';
+        ctx.fillText(`Salary: ${contract.salary_per_match} Coins/match • ${contract.remaining_seasons} Season(s)`, 400, 493);
       } else {
-        ctx.fillText('Club Status: Academy Trainee', 402, 420);
-        drawRoundRect(ctx, 640, 405, 135, 22, 11, 'rgba(245, 158, 11, 0.15)', '#f59e0b', 1);
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = 'bold 10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Trainee Tier', 707, 420);
-
-        ctx.textAlign = 'left';
+        ctx.fillText('Academy Trainee (Draft at Level 4)', 400, 474);
         ctx.fillStyle = '#fbbf24';
-        ctx.font = 'bold 12.5px sans-serif';
-        ctx.fillText('Match Stipend: 20 Coins / match', 402, 442);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px sans-serif';
-        ctx.fillText('Draft opens at Level 4 in /contracts', 402, 460);
+        ctx.font = 'bold 11.5px sans-serif';
+        ctx.fillText('Match Stipend: 20 Coins / match', 400, 493);
       }
 
       // Section: XP Progress
       ctx.fillStyle = '#f43f5e';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(`// LEVEL PROGRESSION (${player.xp} / ${reqXP} XP)`, 385, 498);
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(`// LEVEL PROGRESSION (${player.xp} / ${reqXP} XP)`, 385, 522);
 
       // XP progress bar
-      drawRoundRect(ctx, 385, 512, 405, 22, 11, '#0b1120', 'rgba(255, 255, 255, 0.08)', 1);
+      drawRoundRect(ctx, 385, 530, 405, 22, 11, '#0b1120', 'rgba(255, 255, 255, 0.08)', 1);
       if (xpPercent > 0) {
-        const xpGrad = ctx.createLinearGradient(385, 512, 790, 512);
+        const xpGrad = ctx.createLinearGradient(385, 530, 790, 530);
         xpGrad.addColorStop(0, '#ec4899');
         xpGrad.addColorStop(1, '#f43f5e');
-        drawRoundRect(ctx, 385, 512, Math.round(405 * (Math.min(100, xpPercent) / 100)), 22, 11, xpGrad);
+        drawRoundRect(ctx, 385, 530, Math.round(405 * (Math.min(100, xpPercent) / 100)), 22, 11, xpGrad);
       }
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${Math.round(xpPercent)}% TO LEVEL ${player.level + 1}`, 587, 527);
+      ctx.fillText(`${Math.round(xpPercent)}% TO LEVEL ${player.level + 1}`, 587, 545);
 
       // Draw footer branding
       ctx.fillStyle = '#64748b';
