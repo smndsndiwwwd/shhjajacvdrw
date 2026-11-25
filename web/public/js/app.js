@@ -90,7 +90,8 @@ async function renderShell() {
       { section: 'Development' },
       { id: 'training', icon: '🏋️', label: 'Train, Skills & Academy' },
       { id: 'locker', icon: '🎒', label: 'Shop, Locker & ShotMap' },
-      { id: 'club', icon: '📊', label: 'Club, Stats & Settings' }
+      { id: 'club', icon: '📊', label: 'Club, Stats & History' },
+      { id: 'settings', icon: '⚙️', label: 'Settings & Identity' }
     ] : [
       { section: 'Onboarding' },
       { id: 'begin', icon: '🏏', label: 'Create Cricketer' }
@@ -151,6 +152,7 @@ async function renderShell() {
           </div>
           <div class="hud-actions">
             ${hasPlayer && state.route !== 'players' ? `<button class="btn btn-sm" id="hud-scout-players">🔍 Find Players</button>` : ''}
+            ${hasPlayer && state.route !== 'settings' ? `<button class="btn btn-sm" id="hud-go-settings">⚙️ Settings</button>` : ''}
             ${state.activeMatch && state.route !== 'match' ? `<button class="btn btn-emerald btn-sm" id="hud-resume-match">🔴 Resume Live Match</button>` : ''}
             ${isAdmin && state.route !== 'admin' ? `<button class="btn btn-danger btn-sm" id="hud-go-admin">🛡️ Admin Logs</button>` : ''}
           </div>
@@ -196,6 +198,9 @@ async function renderShell() {
   const scoutHudBtn = document.getElementById('hud-scout-players');
   if (scoutHudBtn) scoutHudBtn.onclick = () => navigate('players');
 
+  const setHudBtn = document.getElementById('hud-go-settings');
+  if (setHudBtn) setHudBtn.onclick = () => navigate('settings');
+
   const admBtn = document.getElementById('hud-go-admin');
   if (admBtn) admBtn.onclick = () => navigate('admin');
 
@@ -235,11 +240,11 @@ async function renderShell() {
       await renderTrainingView(viewRoot, state, refreshBootstrap);
     } else if (state.route === 'locker' && hasPlayer) {
       await renderLockerView(viewRoot, state, refreshBootstrap);
-    } else if (state.route === 'club' && hasPlayer) {
+    } else if ((state.route === 'club' || state.route === 'settings') && hasPlayer) {
       await renderClubAndStatsView(viewRoot, state, async () => {
         await refreshBootstrap();
         if (!state.player) navigate('begin');
-      });
+      }, state.route === 'settings' ? 'settings' : 'stats');
     } else if (state.route === 'admin' && isAdmin) {
       cleanupActiveView = await renderAdminView(viewRoot, state, refreshBootstrap);
     }

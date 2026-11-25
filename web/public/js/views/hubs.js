@@ -410,8 +410,8 @@ export async function renderLockerView(container, state, refresh) {
 // ==========================================
 // 3. CLUB OFFICE, STATS, ACHIEVEMENTS, LEADERBOARDS, SETTINGS
 // ==========================================
-export async function renderClubAndStatsView(container, state, refresh) {
-  let tab = 'stats'; // 'stats' | 'history' | 'achievements' | 'leaderboard' | 'club' | 'settings'
+export async function renderClubAndStatsView(container, state, refresh, initialTab = 'stats') {
+  let tab = initialTab || 'stats'; // 'stats' | 'history' | 'achievements' | 'leaderboard' | 'club' | 'settings'
   let lbType = 'level';
   const [clubData, statsData, lbData] = await Promise.all([
     api('/api/club'),
