@@ -116,11 +116,31 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     `;
   };
 
+  const getCurrentDuelBallHint = () => {
+    if (duel?.currentBallPreview?.length) return duel.currentBallPreview;
+    if (duel?.state?.pendingDelivery?.length) return duel.state.pendingDelivery;
+    const rev = `${duel?.fullDeliveryReveal || ''} ${duel?.releaseCue || ''}`;
+    let length = null;
+    if (/full toss/i.test(rev)) length = 'Full Toss';
+    else if (/yorker/i.test(rev)) length = 'Yorker';
+    else if (/good length/i.test(rev)) length = 'Good Length';
+    else if (/\bfull\b/i.test(rev)) length = 'Full';
+    else if (/\bshort\b/i.test(rev)) length = 'Short';
+    if (!length) return null;
+    let line = null;
+    if (/off side/i.test(rev)) line = 'Off Side';
+    else if (/leg side/i.test(rev)) line = 'Leg Side';
+    else if (/wide/i.test(rev)) line = 'Wide';
+    else if (/stumps/i.test(rev)) line = 'Stumps';
+    return { length, line, speed: /\bfast\b/i.test(rev) ? 'Fast' : /\bslow\b/i.test(rev) ? 'Slow' : 'Medium' };
+  };
+
   const syncCanvasConfig = () => {
     if (!renderer || !duel?.state) return;
     const st = duel.state;
     const isBatter = st.batterId === state.player.discord_id;
     const isLeftHand = String(duel.batterHand || '').toLowerCase().includes('left');
+    const curHint = isBatter && duel.status === 'active' ? getCurrentDuelBallHint() : null;
     renderer.updateConfig({
       phase: isBatter ? 'batting' : 'bowling',
       pitch: 'Flat Belter',
@@ -131,7 +151,8 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
       selectedFootwork: selFootwork || 'Front Foot',
       selectedIntent: selIntent || 'Stroke',
       selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
-      allowZoneClick: isBatter && batStep === 'zone'
+      allowZoneClick: isBatter && batStep === 'zone',
+      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null
     });
   };
 
@@ -400,7 +421,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
       const curDeliv = ended
         ? (st.lastBall?.delivery || null)
         : isBatter
-          ? (duel.currentBallPreview || null)
+          ? getCurrentDuelBallHint()
           : { line: selLine || 'Stumps', length: selLength || 'Good Length', speed: selSpeed || 'Fast' };
       const lengthOnly = !ended && isBatter && batStep !== 'zone' && Boolean(curDeliv);
       outHost.innerHTML = `

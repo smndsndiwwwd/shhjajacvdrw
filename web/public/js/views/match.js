@@ -150,11 +150,32 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     `;
   };
 
+  const getCurrentBallHint = () => {
+    if (match?.currentBallPreview?.length) return match.currentBallPreview;
+    const rev = `${match?.fullDeliveryReveal || ''} ${match?.releaseCue || ''}`;
+    let length = null;
+    if (/full toss/i.test(rev)) length = 'Full Toss';
+    else if (/yorker/i.test(rev)) length = 'Yorker';
+    else if (/good length/i.test(rev)) length = 'Good Length';
+    else if (/\bfull\b/i.test(rev)) length = 'Full';
+    else if (/\bshort\b/i.test(rev)) length = 'Short';
+
+    let line = null;
+    if (/off side/i.test(rev)) line = 'Off Side';
+    else if (/leg side/i.test(rev)) line = 'Leg Side';
+    else if (/wide/i.test(rev)) line = 'Wide';
+    else if (/stumps/i.test(rev)) line = 'Stumps';
+
+    const speed = /\bfast\b/i.test(rev) ? 'Fast' : /\bslow\b/i.test(rev) ? 'Slow' : 'Medium';
+    return length ? { length, line, speed } : null;
+  };
+
   const syncCanvasConfig = () => {
     if (!renderer || !match) return;
     const isBat = match.phase === 'batting';
     const handStr = isBat ? match.battingHand : match.oppBatterHand;
     const isLeftHand = String(handStr || '').toLowerCase().includes('left');
+    const curHint = isBat && !match.finished ? getCurrentBallHint() : null;
     renderer.updateConfig({
       phase: match.phase,
       pitch: match.pitch,
@@ -165,7 +186,8 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       selectedFootwork: selFootwork || 'Front Foot',
       selectedIntent: selIntent || 'Stroke',
       selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
-      allowZoneClick: batStep === 'zone'
+      allowZoneClick: batStep === 'zone',
+      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null
     });
   };
 
@@ -663,14 +685,14 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     const curDeliv = match.finished
       ? (match.lastBall?.delivery || null)
       : isBat
-        ? (match.currentBallPreview || null)
+        ? getCurrentBallHint()
         : { line: selLine || 'Stumps', length: selLength || 'Good Length', speed: selSpeed || 'Fast' };
     const lengthOnly = !match.finished && isBat && batStep !== 'zone';
     const caption = !curDeliv
       ? 'Awaiting delivery'
       : lengthOnly
         ? `Length Hint: ${esc(curDeliv.length)} • Line reveals at Step 4`
-        : `${esc(curDeliv.length)} • ${esc(curDeliv.line)} (${esc(curDeliv.speed)})`;
+        : `${esc(curDeliv.length)} • ${esc(curDeliv.line || 'Stumps')} (${esc(curDeliv.speed || 'Medium')})`;
     return `
       <div class="card" style="padding:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">

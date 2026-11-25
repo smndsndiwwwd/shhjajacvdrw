@@ -71,13 +71,14 @@ export function renderHawkEyePitchSVG({ delivery = null, lengthOnly = false, bat
   else if (line === 'Wide') bx = isLeft ? 156 : 64;
 
   // Map Length to Y (bowler top ~22 -> batter crease bottom ~158)
+  const lenLower = String(len || '').toLowerCase();
   let by = 96;
   let bandY = 76;
   let bandH = 36;
-  if (len === 'Yorker') { by = 148; bandY = 140; bandH = 18; }
-  else if (len === 'Full' || len === 'Full Toss') { by = 126; bandY = 112; bandH = 28; }
-  else if (len === 'Good Length') { by = 92; bandY = 76; bandH = 36; }
-  else if (len === 'Short') { by = 58; bandY = 42; bandH = 34; }
+  if (lenLower.includes('yorker')) { by = 148; bandY = 140; bandH = 18; }
+  else if (lenLower.includes('full')) { by = 126; bandY = 112; bandH = 28; }
+  else if (lenLower.includes('good')) { by = 92; bandY = 76; bandH = 36; }
+  else if (lenLower.includes('short')) { by = 58; bandY = 42; bandH = 34; }
 
   return `
     <svg viewBox="0 0 220 185" style="width:100%;max-width:230px;display:block;margin:0 auto;">
@@ -111,8 +112,9 @@ export function renderHawkEyePitchSVG({ delivery = null, lengthOnly = false, bat
 
       ${delivery && lengthOnly ? `
         <!-- Initial Release Hint: Length Band Highlight Only -->
-        <rect x="66" y="${bandY}" width="88" height="${bandH}" fill="rgba(251,191,36,0.34)" stroke="#fbbf24" stroke-width="1.8" stroke-dasharray="4 2" />
-        <text x="110" y="${by + 3}" fill="#0f172a" font-size="8" font-weight="800" font-family="JetBrains Mono" text-anchor="middle">${(len || '').toUpperCase()}</text>
+        <rect x="66" y="${bandY}" width="88" height="${bandH}" fill="rgba(251,191,36,0.38)" stroke="#fbbf24" stroke-width="1.8" stroke-dasharray="4 2" />
+        <rect x="76" y="${by - 7}" width="68" height="13" rx="3" fill="rgba(2,6,23,0.82)" />
+        <text x="110" y="${by + 2.5}" fill="#fde68a" font-size="8" font-weight="800" font-family="JetBrains Mono" text-anchor="middle">${(len || '').toUpperCase()}</text>
       ` : delivery ? `
         <!-- Trajectory & Bounce Marker -->
         <line x1="110" y1="24" x2="${bx}" y2="${by}" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4 3" />

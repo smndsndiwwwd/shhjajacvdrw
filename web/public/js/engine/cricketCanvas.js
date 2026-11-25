@@ -127,6 +127,7 @@ export class CricketArcadeRenderer {
       selectedIntent: 'Stroke',
       selectedZone: null,
       allowZoneClick: false,
+      currentBallHint: null,
       bowlPitchTarget: { line: 'Stumps', length: 'Good Length', wx: 0, wy: 24 }
     };
 
@@ -797,9 +798,59 @@ export class CricketArcadeRenderer {
     drawLine3D(-22, STRIKER_Y - 22, -22, STRIKER_Y + 10);
     drawLine3D(22, STRIKER_Y - 22, 22, STRIKER_Y + 10);
 
-    // 5. Interactive Aiming Wedge (Batting, only once user chooses a direction) or Pitch Target Marker (Bowling)
+    // 5. Interactive Aiming Wedge + Pitch Length/Bounce Hint (Batting) or Pitch Target Marker (Bowling)
     if (!this.anim) {
       if (this.state.phase === 'batting') {
+        const hint = this.state.currentBallHint;
+        if (hint?.length) {
+          const span = STRIKER_Y - BOWLER_Y;
+          const lenKey = String(hint.length).toLowerCase();
+          let t1 = 0.42, t2 = 0.64, lbl = 'GOOD LENGTH';
+          if (lenKey.includes('yorker')) { t1 = 0.85; t2 = 1.01; lbl = 'YORKER'; }
+          else if (lenKey.includes('full')) { t1 = 0.64; t2 = 0.85; lbl = lenKey.includes('toss') ? 'FULL TOSS' : 'FULL'; }
+          else if (lenKey.includes('short')) { t1 = 0.18; t2 = 0.42; lbl = 'SHORT'; }
+
+          const y1 = BOWLER_Y + span * t1;
+          const y2 = BOWLER_Y + span * t2;
+          const q = [
+            this.project(-PITCH_HALF_W, y1, 0.8),
+            this.project(PITCH_HALF_W, y1, 0.8),
+            this.project(PITCH_HALF_W, y2, 0.8),
+            this.project(-PITCH_HALF_W, y2, 0.8)
+          ];
+          ctx.fillStyle = hint.fullReveal ? 'rgba(56, 189, 248, 0.28)' : 'rgba(251, 191, 36, 0.30)';
+          ctx.strokeStyle = hint.fullReveal ? '#38bdf8' : '#fbbf24';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          q.forEach((pt, idx) => idx === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          const midP = this.project(0, (y1 + y2) * 0.5, 2);
+          ctx.font = 'bold 10px JetBrains Mono, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+          ctx.fillRect(midP.x - 40, midP.y - 8, 80, 15);
+          ctx.fillStyle = hint.fullReveal ? '#7dd3fc' : '#fde68a';
+          ctx.fillText(lbl, midP.x, midP.y + 3);
+
+          if (hint.fullReveal && hint.line) {
+            const spot = this.deliveryToWorldPoint(hint);
+            const sp = this.project(spot.wx, spot.wy, 1.5);
+            const pulse = 6 + Math.sin(timeSec * 5) * 2;
+            ctx.strokeStyle = '#fb7185';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(sp.x, sp.y, pulse, pulse * 0.55, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#f43f5e';
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, 3.6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
         if (this.state.selectedZone) {
           const ang = getZoneWorldAngle(this.state.selectedZone, this.state.isLeftHand);
           const origP = this.project(0, STRIKER_Y, 6);
