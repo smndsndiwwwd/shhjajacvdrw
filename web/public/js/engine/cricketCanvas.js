@@ -439,11 +439,11 @@ export class CricketArcadeRenderer {
   startLoop() {
     this.lastTime = performance.now();
     const tick = (now) => {
+      this.rafId = requestAnimationFrame(tick);
       const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
       this.lastTime = now;
       this.update(dt, now * 0.001);
       this.draw(now * 0.001);
-      this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
   }
@@ -1071,10 +1071,13 @@ export class CricketArcadeRenderer {
     ctx.font = 'bold 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     const fldRule = this.state.isPowerplay ? 'POWERPLAY (2 OUT / 7 IN)' : 'OPEN FIELD (5 OUT / 4 IN)';
+    const aimTxt = this.state.selectedZone ? ` • AIM: ${String(this.state.selectedZone).toUpperCase()}` : '';
+    const spotLen = String(this.state.bowlPitchTarget?.length || 'Good Length').toUpperCase();
+    const spotLine = String(this.state.bowlPitchTarget?.line || 'Stumps').toUpperCase();
     ctx.fillText(
       this.state.phase === 'batting'
-        ? `${fldRule} • AIM: ${this.state.selectedZone.toUpperCase()}`
-        : `${fldRule} • SPOT: ${this.state.bowlPitchTarget.length.toUpperCase()} (${this.state.bowlPitchTarget.line.toUpperCase()})`,
+        ? `${fldRule}${aimTxt}`
+        : `${fldRule} • SPOT: ${spotLen} (${spotLine})`,
       22,
       30
     );
