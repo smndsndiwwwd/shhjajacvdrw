@@ -33,6 +33,7 @@ import { recordSystemLog } from '../../src/game/systemLog.js';
 
 const PENDING_CHALLENGE_TTL_MS = 15 * 60 * 1000; // 15 mins to accept/decline
 const ACTIVE_CHALLENGE_TTL_MS = 30 * 60 * 1000;  // 30 mins per turn/activity before auto-end
+const CHALLENGE_MIN_LEVEL = 5;
 
 export function sweepExpiredWebChallenges(database = db) {
   const now = Date.now();
@@ -362,7 +363,7 @@ export async function handleModeRoutes(req, res, pathname) {
       insAI.run(playerId, `${fNames[Math.floor(Math.random() * fNames.length)]} ${lNames[Math.floor(Math.random() * lNames.length)]}`, 'Bowler', t.id, leagueId, 72 + Math.floor(Math.random() * 23));
     }
 
-    const signOnCoins = Math.round(finalVal / 100);
+    const signOnCoins = Math.min(250, Math.round(finalVal / 500));
     db.prepare('UPDATE players SET coins = coins + ? WHERE discord_id = ?').run(signOnCoins, playerId);
 
     recordSystemLog({
@@ -396,7 +397,7 @@ export async function handleModeRoutes(req, res, pathname) {
     const userRank = standings.findIndex(s => s.team_id === pf.team_id) + 1;
     const lastMatch = db.prepare("SELECT result FROM match_history WHERE player_id = ? AND match_type = 'franchise' ORDER BY id DESC LIMIT 1").get(playerId);
     const wonTrophy = userRank <= 4 && lastMatch?.result === 'Won';
-    const titlePrize = wonTrophy ? league.prizeMoney : 0;
+    const titlePrize = wonTrophy ? Math.min(800, Math.round(league.prizeMoney / 12)) : 0;
 
     const orangeWinner = db.prepare('SELECT name, runs FROM ai_players WHERE player_id = ? ORDER BY runs DESC LIMIT 1').get(playerId);
     const purpleWinner = db.prepare('SELECT name, wickets FROM ai_players WHERE player_id = ? ORDER BY wickets DESC LIMIT 1').get(playerId);
@@ -411,8 +412,8 @@ export async function handleModeRoutes(req, res, pathname) {
       repGained += 50;
       awards.push(`🏆 ${league.shortName} Champions`);
     }
-    if (wonOrangeCap) { repGained += 40; awardCoins += 500; awards.push('🍊 Orange Cap'); }
-    if (wonPurpleCap) { repGained += 40; awardCoins += 500; awards.push('🍇 Purple Cap'); }
+    if (wonOrangeCap) { repGained += 40; awardCoins += 120; awards.push('🍊 Orange Cap'); }
+    if (wonPurpleCap) { repGained += 40; awardCoins += 120; awards.push('🍇 Purple Cap'); }
 
     db.prepare('UPDATE players SET reputation = reputation + ?, coins = coins + ? WHERE discord_id = ?').run(repGained, awardCoins, playerId);
     const cooldownTime = Date.now() + (10 * 24 * 60 * 60 * 1000);
@@ -497,7 +498,7 @@ function enrichChallengeRow(database, row) {
     sweepExpiredWebChallenges(db);
 
     const myStats = db.prepare('SELECT * FROM challenge_stats WHERE player_id = ?').get(playerId) || { played: 0, won: 0, lost: 0, runs: 0, wickets: 0, fours: 0, sixes: 0 };
-    const rivals = db.prepare('SELECT discord_id, public_id, name, level, primary_role, nationality FROM players WHERE discord_id != ? ORDER BY level DESC LIMIT 50').all(playerId);
+    const rivals = db.prepare('SELECT discord_id, public_id, name, level, primary_role, nationality FROM players WHERE discord_id != ? AND level >= ? ORDER BY level DESC LIMIT 50').all(playerId, CHALLENGE_MIN_LEVEL);
     const challenges = db.prepare(`
       SELECT c.*, p1.name as challenger_name, p1.public_id as challenger_public_id,
              COALESCE(p2.name, 'AI Challenger Bot') as opponent_name, p2.public_id as opponent_public_id
@@ -514,12 +515,15 @@ function enrichChallengeRow(database, row) {
       ORDER BY cs.won DESC, cs.runs DESC LIMIT 20
     `).all();
 
-    return sendJson(res, 200, { myStats, rivals, challenges, leaderboard });
+    return sendJson(res, 200, { myStats, rivals, challenges, leaderboard, minLevel: CHALLENGE_MIN_LEVEL });
   }
 
   if (pathname === '/api/challenge/create' && req.method === 'POST') {
     const player = getPlayer(res, user);
     if (!player) return true;
+    if ((player.level || 1) < CHALLENGE_MIN_LEVEL) {
+      return sendJson(res, 403, { error: `Challenge Mode unlocks at Level ${CHALLENGE_MIN_LEVEL}! Reach Level ${CHALLENGE_MIN_LEVEL} first (currently Level ${player.level}).` });
+    }
     sweepExpiredWebChallenges(db);
 
     const ownOngoing = db.prepare(`
@@ -541,6 +545,9 @@ function enrichChallengeRow(database, row) {
     if (!isAi) {
       const opp = resolvePlayerByIdentifier(db, opponentId);
       if (!opp) return sendJson(res, 404, { error: 'Opponent not found.' });
+      if ((opp.level || 1) < CHALLENGE_MIN_LEVEL) {
+        return sendJson(res, 403, { error: `${opp.name} hasn't unlocked Challenge Mode yet (requires Level ${CHALLENGE_MIN_LEVEL}).` });
+      }
       opponentId = opp.discord_id;
       if (opponentId === playerId) return sendJson(res, 400, { error: 'Cannot challenge yourself!' });
 
@@ -641,6 +648,9 @@ function enrichChallengeRow(database, row) {
     }
 
     if (body.accept) {
+      if ((player.level || 1) < CHALLENGE_MIN_LEVEL) {
+        return sendJson(res, 403, { error: `Challenge Mode unlocks at Level ${CHALLENGE_MIN_LEVEL}!` });
+      }
       const busy = db.prepare(`
         SELECT id FROM web_challenges
         WHERE (challenger_id = ? OR opponent_id = ?) AND status IN ('pending', 'active') AND id != ?
@@ -783,7 +793,7 @@ function enrichChallengeRow(database, row) {
         }
 
         if (winnerId !== 'ai_rival') {
-          db.prepare('UPDATE players SET coins = coins + 50, reputation = reputation + 5 WHERE discord_id = ?').run(winnerId);
+          db.prepare('UPDATE players SET coins = coins + 25, reputation = reputation + 5 WHERE discord_id = ?').run(winnerId);
           addXP(db, winnerId, 60);
         }
         if (loserId !== 'ai_rival') {

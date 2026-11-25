@@ -654,8 +654,8 @@ export async function handleRunAuction(interaction, leagueId) {
           .setStyle(ButtonStyle.Primary)
       );
 
-      // Pay sign-on bonus: 10% of contract value converted to coins
-      const signOnCoins = Math.round(finalStep.val / 100);
+      // Pay balanced sign-on bonus capped against coin inflation
+      const signOnCoins = Math.min(250, Math.round(finalStep.val / 500));
       db.prepare('UPDATE players SET coins = coins + ? WHERE discord_id = ?').run(signOnCoins, discordId);
 
       const teamName = league.teams.find(t => t.id === finalStep.teamId)?.name || buyerTeam.name;
@@ -667,12 +667,12 @@ export async function handleRunAuction(interaction, leagueId) {
           `• **Franchise:** ${league.emoji} **${teamName}**\n` +
           `• **Contract Value:** \`$${finalStep.val.toLocaleString()}\`\n` +
           `• **Assigned Squad Role:** **${finalStep.role}**\n` +
-          `• **Sign-on Bonus credited:** **${emojis.coin} ${signOnCoins} Coins** (10% of contract value)\n\n` +
+          `• **Sign-on Bonus credited:** **${emojis.coin} ${signOnCoins} Coins**\n\n` +
           `**Contract Perks & Bonuses:**\n` +
-          `• **Run Bonus:** ${emojis.coin} 2 per run scored\n` +
-          `• **Wicket Bonus:** ${emojis.coin} 20 per wicket taken\n` +
-          `• **Century Bonus:** ${emojis.coin} 150 flat coin bonus\n` +
-          `• **Match Day Stipend:** ${emojis.coin} ${Math.round(league.avgSalary * (finalStep.role.includes('Marquee') ? 1.5 : finalStep.role.includes('Starter') ? 1.2 : 0.8))} coins per match`
+          `• **Run Bonus:** ${emojis.coin} 1 per 4 runs scored\n` +
+          `• **Wicket Bonus:** ${emojis.coin} 10 per wicket taken\n` +
+          `• **Milestone Bonus:** ${emojis.coin} +25 (50s) / +60 (100s)\n` +
+          `• **Match Day Fee:** ${emojis.coin} ${Math.min(220, Math.round((league.avgSalary / 15) * (finalStep.role.includes('Marquee') ? 1.5 : finalStep.role.includes('Starter') ? 1.2 : 0.8)))} coins per match`
         )
         .setColor('#2ecc71')
         .setTimestamp();
@@ -3494,14 +3494,14 @@ async function finishFranchiseMatch(interaction, player, pf, won, runs, balls, f
   const league = franchiseLeagues[pf.league_id] || Object.values(franchiseLeagues)[0];
   const userTeam = league.teams.find(t => t.id === pf.team_id) || league.teams[0];
 
-  // Calculate salary
-  let matchSalary = Math.round(league.avgSalary * (pf.contract_role.includes('Marquee') ? 1.5 : pf.contract_role.includes('Starter') ? 1.2 : 0.8));
-  if (!won) matchSalary = Math.round(matchSalary * 0.8); // 20% loss deduction
+  // Calculate balanced match fee
+  let matchSalary = Math.min(220, Math.round((league.avgSalary / 15) * (pf.contract_role.includes('Marquee') ? 1.5 : pf.contract_role.includes('Starter') ? 1.2 : 0.8)));
+  if (!won) matchSalary = Math.round(matchSalary * 0.75);
 
   // Calculate bonuses
-  const runBonus = runs * 2;
-  const wicketBonus = bowlingWickets * 20;
-  const centuryBonus = runs >= 100 ? 150 : (runs >= 50 ? 50 : 0);
+  const runBonus = Math.floor(runs / 4);
+  const wicketBonus = bowlingWickets * 10;
+  const centuryBonus = runs >= 100 ? 60 : (runs >= 50 ? 25 : 0);
   const totalCoinsEarned = matchSalary + runBonus + wicketBonus + centuryBonus;
 
   // Update Player Wallet & stats

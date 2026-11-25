@@ -1,4 +1,5 @@
 import { api, esc, toast } from './api.js';
+import { caIcon } from './components/icons.js';
 import { renderAuthView } from './views/auth.js';
 import { renderBeginWizard } from './views/begin.js';
 import { renderDashboardView } from './views/dashboard.js';
@@ -141,9 +142,10 @@ async function renderShell() {
               <span>CRICKET ASCEND</span>
             </span>
             ${hasPlayer ? `
-              <div class="hud-chip">⚡ <strong>${state.player.energy}</strong>/100</div>
-              <div class="hud-chip">🪙 <strong>${state.player.coins.toLocaleString()}</strong></div>
-              <div class="hud-chip">🌟 LVL <strong>${state.player.level}</strong></div>
+              <div class="hud-chip ic-val">${caIcon('energy', 15)} <strong>${state.player.energy}</strong>/100</div>
+              <div class="hud-chip ic-val">${caIcon('coin', 15)} <strong>${state.player.coins.toLocaleString()}</strong></div>
+              <div class="hud-chip ic-val">${caIcon('ticket', 15)} <strong>${state.player.training_tokens}</strong></div>
+              <div class="hud-chip ic-val">${caIcon('skill', 15)} LVL <strong>${state.player.level}</strong></div>
               <div class="hud-chip mono">🪪 <strong>${esc(state.player.public_id || state.player.discord_id)}</strong></div>
             ` : `<div class="hud-chip">👋 Welcome <strong>${esc(state.user.username)}</strong></div>`}
           </div>

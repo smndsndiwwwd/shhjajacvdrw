@@ -647,6 +647,18 @@ export async function handleChallenge(interaction) {
     });
   }
 
+  const CHALLENGE_MIN_LEVEL = 5;
+  if ((challenger.level || 1) < CHALLENGE_MIN_LEVEL) {
+    return interaction.editReply({
+      content: `🔒 Challenge Mode unlocks at **Level ${CHALLENGE_MIN_LEVEL}**! Reach Level ${CHALLENGE_MIN_LEVEL} via Chapters, Practice, or Training first (You are currently Level ${challenger.level || 1}).`
+    });
+  }
+  if ((target.level || 1) < CHALLENGE_MIN_LEVEL) {
+    return interaction.editReply({
+      content: `🔒 **${target.name}** hasn't unlocked Challenge Mode yet (requires Level ${CHALLENGE_MIN_LEVEL}).`
+    });
+  }
+
   // Check cooldown (bypass for bot owner)
   const app = await interaction.client.application.fetch();
   const isOwner = app.owner.members ? app.owner.members.has(challengerId) : app.owner.id === challengerId;

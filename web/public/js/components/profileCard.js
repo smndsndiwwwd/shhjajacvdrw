@@ -136,22 +136,33 @@ function drawProfileToCanvas(canvas, data, logoImg = null, avatarImg = null) {
   }
   ctx.fillText(player.name || 'Cricketer', 189, 198);
 
-  // Badges Row: ID | LVL | ROLE
-  roundRect(ctx, 40, 210, 92, 24, 12, 'rgba(56, 189, 248, 0.16)', '#38bdf8', 1);
-  ctx.fillStyle = '#7dd3fc';
-  ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
-  ctx.fillText(publicId, 86, 226);
+  const completedChapters = Math.min(50, player.current_chapter || 1);
+  // Compute OVR rating cleanly (45..99)
+  const attrVals = Object.values(data.effectiveAttributes || {}).filter(v => typeof v === 'number');
+  const avgAttr = attrVals.length > 0 ? attrVals.reduce((a, b) => a + b, 0) / attrVals.length : 15;
+  const ovr = Math.min(99, Math.max(45, Math.round(40 + avgAttr * 0.85 + (player.level || 1) * 0.45)));
 
-  roundRect(ctx, 138, 210, 80, 24, 12, 'rgba(245, 158, 11, 0.18)', '#f59e0b', 1);
+  // Badges Row: ID | OVR | LVL | ROLE
+  roundRect(ctx, 40, 210, 82, 24, 12, 'rgba(56, 189, 248, 0.16)', '#38bdf8', 1);
+  ctx.fillStyle = '#7dd3fc';
+  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.fillText(publicId, 81, 226);
+
+  roundRect(ctx, 127, 210, 56, 24, 12, 'rgba(16, 185, 129, 0.18)', '#10b981', 1);
+  ctx.fillStyle = '#34d399';
+  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.fillText(`OVR ${ovr}`, 155, 226);
+
+  roundRect(ctx, 188, 210, 62, 24, 12, 'rgba(245, 158, 11, 0.18)', '#f59e0b', 1);
   ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 10.5px "JetBrains Mono", monospace';
-  ctx.fillText(`LVL ${player.level || 1}`, 178, 226);
+  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.fillText(`LVL ${player.level || 1}`, 219, 226);
 
   const rc = ROLE_COLORS[player.primary_role] || ROLE_COLORS['Batsman'];
-  roundRect(ctx, 224, 210, 114, 24, 12, rc.bg, rc.border, 1);
+  roundRect(ctx, 255, 210, 84, 24, 12, rc.bg, rc.border, 1);
   ctx.fillStyle = rc.text;
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillText(String(player.primary_role || 'PLAYER').toUpperCase(), 281, 226);
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText(String(player.primary_role || 'PLAYER').toUpperCase(), 297, 226);
 
   // Bio Info Fields
   const drawBio = (y, label, val, col = '#fff') => {
@@ -297,7 +308,7 @@ function loadPlayerAvatarForCanvas(url) {
   });
 }
 
-function openSetProfilePhotoModal(currentUrl, onSaved) {
+export function openSetProfilePhotoModal(currentUrl, onSaved) {
   let pendingDataUrl = currentUrl || '';
   openModal(`
     <div style="display:flex;flex-direction:column;gap:14px;">
@@ -386,24 +397,18 @@ function openSetProfilePhotoModal(currentUrl, onSaved) {
   };
 }
 
-export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, onNavigate = null, onChallenge = null, onPhotoUpdated = null } = {}) {
+export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, onChallenge = null } = {}) {
   const { player = {} } = data || {};
   const publicId = player.public_id || player.discord_id || 'CA-0000';
 
   hostEl.innerHTML = `
-    <div class="card card-glow-cyan" style="padding:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+    <div class="card card-glow-cyan" style="padding:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span class="badge badge-cyan">🪪 PLAYER PROFILE CARD</span>
-          <span class="badge badge-gold mono">ID: ${esc(publicId)}</span>
-          <span class="badge badge-muted">Includes Career Stats</span>
+          <span class="badge badge-gold mono">${esc(publicId)}</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${isSelf ? `<button class="btn btn-primary btn-sm card-photo-btn">📷 Set Photo</button>` : ''}
-          ${isSelf && onNavigate ? `
-            <button class="btn btn-emerald btn-sm card-act-btn" data-act="campaign">🏏 Play Match</button>
-            <button class="btn btn-sm card-act-btn" data-act="players">🔍 Scout Players</button>
-          ` : ''}
           ${!isSelf && onChallenge ? `
             <button class="btn btn-gold btn-sm card-chal-btn">⚔️ Challenge (${esc(publicId)})</button>
           ` : ''}
@@ -430,16 +435,6 @@ export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, o
     }
   });
 
-  const photoBtn = hostEl.querySelector('.card-photo-btn');
-  if (photoBtn) {
-    photoBtn.onclick = () => openSetProfilePhotoModal(player.avatar_url, async (newUrl) => {
-      data.player.avatar_url = newUrl;
-      loadedAvatar = await loadPlayerAvatarForCanvas(newUrl);
-      drawProfileToCanvas(canvas, data, cachedLogoImg, loadedAvatar);
-      if (onPhotoUpdated) await onPhotoUpdated(newUrl);
-    });
-  }
-
   hostEl.querySelector('.card-dl-btn').onclick = () => {
     const link = document.createElement('a');
     link.download = `cricket_ascend_${String(player.name || 'player').replace(/[^a-z0-9]/gi, '_')}_${publicId}.png`;
@@ -447,10 +442,6 @@ export function renderCommonProfileGraphicCard(hostEl, data, { isSelf = false, o
     link.click();
     toast('Profile card PNG downloaded!', 'success');
   };
-
-  hostEl.querySelectorAll('.card-act-btn').forEach(btn => {
-    btn.onclick = () => onNavigate && onNavigate(btn.dataset.act);
-  });
 
   const chalBtn = hostEl.querySelector('.card-chal-btn');
   if (chalBtn && onChallenge) {

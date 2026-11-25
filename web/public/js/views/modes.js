@@ -1,4 +1,5 @@
 import { api, esc, formatRichText, toast, openModal, closeModal } from '../api.js';
+import { caIcon } from '../components/icons.js';
 import { openPlayerProfileModal } from '../components/profileCard.js';
 import { mountChallengeDuelArena } from './challengeDuel.js';
 
@@ -411,15 +412,33 @@ export async function renderChallengeView(container, state, refresh) {
     return `${mins}m ${String(secs).padStart(2, '0')}s left`;
   };
 
+  const minLvl = hub.minLevel || 5;
+  const challengeLocked = (state.player.level || 1) < minLvl;
+
   container.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:18px;">
       <div id="challenge-arena-host"></div>
+
+      ${challengeLocked ? `
+        <div class="card card-glow-crimson" style="padding:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div>
+              <span class="badge badge-crimson">🔒 LOCKED FEATURE • REQUIRES LEVEL ${minLvl}</span>
+              <h2 style="margin:8px 0 4px;">Challenge Mode Unlocks at Level ${minLvl}</h2>
+              <p style="margin:0;color:var(--text-muted);font-size:0.88rem;">
+                You are currently <strong>Level ${state.player.level || 1}</strong>. Build your skills in Career Chapters, Practice Nets, or Training to unlock head-to-head PvP duels!
+              </p>
+            </div>
+            <div class="mono" style="font-size:1.4rem;color:var(--gold);font-weight:700;">LVL ${state.player.level || 1} / ${minLvl}</div>
+          </div>
+        </div>
+      ` : ''}
 
       <div class="grid-2">
         <div class="card card-glow-cyan">
           <h3>⚔️ Issue 1-Over Challenge Duel</h3>
           <p style="color:var(--text-muted);font-size:0.85rem;margin:6px 0 14px;">Challenge another registered player online or take on the AI Challenger Bot in a 6-ball shootout!</p>
-          <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;flex-direction:column;gap:10px;opacity:${challengeLocked ? '0.5' : '1'};pointer-events:${challengeLocked ? 'none' : 'auto'};">
             <div>
               <label class="label">Filter Rival (Name, Similar Name, or Unique ID)</label>
               <input id="chal-opp-filter" class="input" placeholder="Filter by name or ID (e.g. CA-1002)..." style="margin-bottom:8px;" />
@@ -438,7 +457,7 @@ export async function renderChallengeView(container, state, refresh) {
                 ⚠️ You already have an ongoing <strong>${esc(myOngoingChallenge.status)}</strong> challenge (${fmtTimeLeft(myOngoingChallenge.expires_at) || 'active'}). Complete or cancel it before creating another!
               </div>
             ` : ''}
-            <button class="btn btn-primary" id="btn-create-chal" ${myOngoingChallenge ? 'disabled' : ''}>⚔️ Launch Challenge</button>
+            <button class="btn btn-primary" id="btn-create-chal" ${myOngoingChallenge || challengeLocked ? 'disabled' : ''}>${challengeLocked ? `🔒 Unlocks at Level ${minLvl}` : '⚔️ Launch Challenge'}</button>
           </div>
         </div>
 

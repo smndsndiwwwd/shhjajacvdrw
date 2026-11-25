@@ -390,7 +390,7 @@ export function startWebMatch(playerId, options = {}) {
       totalOvers: 2,
       pitch: randomPitch(),
       rewardXP: lvl * 20 + 50,
-      rewardCoins: lvl * 10 + 20
+      rewardCoins: Math.min(60, 15 + lvl * 2)
     };
   } else if (mode === 'quick') {
     if (currentEnergy < 10) throw new Error(`Not enough energy (${currentEnergy}/100). Need 10 Energy.`);
@@ -453,7 +453,7 @@ export function startWebMatch(playerId, options = {}) {
       totalOvers,
       pitch,
       rewardXP: Math.round(tournament.rewards.xp * 0.35),
-      rewardCoins: Math.round(tournament.rewards.coins * 0.25),
+      rewardCoins: Math.round(tournament.rewards.coins * 0.08),
       attack,
       roster
     };
@@ -987,7 +987,7 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
 
   const tier = getPlayerTier(player.level);
   let xpEarned = won ? (match.rewardXP || 100) : (match.lossXP || Math.round((match.rewardXP || 100) * 0.25));
-  let coinsEarned = won ? (match.rewardCoins || 0) : (match.mode === 'quick' ? 0 : 10);
+  let coinsEarned = won ? (match.rewardCoins || 0) : (match.mode === 'quick' ? 0 : 5);
   let repEarned = won ? 5 : 1;
   let tokenReward = (won && (match.mode === 'chapter' || match.mode === 'practice')) ? (Math.random() < 0.3 ? 2 : 1) : 0;
   let bonusNotes = [];
@@ -995,7 +995,7 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   if (match.mode === 'chapter' || match.mode === 'practice') {
     const activeContract = db.prepare('SELECT id, salary_per_match, remaining_seasons FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
     const baseSalary = activeContract ? activeContract.salary_per_match : tier.stipend;
-    const matchSalary = won ? baseSalary : Math.round(baseSalary * 0.5);
+    const matchSalary = won ? Math.round(baseSalary * 0.4) : Math.round(baseSalary * 0.15);
     coinsEarned += matchSalary;
 
     if (match.mode === 'chapter' && won) {
@@ -1035,7 +1035,7 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
           high_score = MAX(high_score, ?)
       `).run(playerId, tournament.id, runs, runs);
       xpEarned += tournament.rewards.xp;
-      coinsEarned += tournament.rewards.coins;
+      coinsEarned += Math.round(tournament.rewards.coins * 0.4);
       repEarned += tournament.rewards.reputation;
       tokenReward += 2;
       bonusNotes.push(`🏆 CHAMPION! Won ${tournament.rewards.trophy}!`);
@@ -1061,11 +1061,11 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
     }
   } else if (match.mode === 'franchise') {
     const { pf, league, oppTeam } = match.extraMeta;
-    let matchSalary = Math.round(league.avgSalary * (pf.contract_role.includes('Marquee') ? 1.5 : pf.contract_role.includes('Starter') ? 1.2 : 0.8));
-    if (!won) matchSalary = Math.round(matchSalary * 0.8);
-    const runBonus = runs * 2;
-    const wicketBonus = bowlingWickets * 20;
-    const centuryBonus = runs >= 100 ? 150 : (runs >= 50 ? 50 : 0);
+    let matchSalary = Math.min(220, Math.round((league.avgSalary / 15) * (pf.contract_role.includes('Marquee') ? 1.5 : pf.contract_role.includes('Starter') ? 1.2 : 0.8)));
+    if (!won) matchSalary = Math.round(matchSalary * 0.75);
+    const runBonus = Math.floor(runs / 4);
+    const wicketBonus = bowlingWickets * 10;
+    const centuryBonus = runs >= 100 ? 60 : (runs >= 50 ? 25 : 0);
     coinsEarned = matchSalary + runBonus + wicketBonus + centuryBonus;
 
     const userDismissed = match.bat.wickets > 0 ? 1 : 0;

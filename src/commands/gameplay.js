@@ -658,7 +658,7 @@ export async function handlePlay(interaction) {
       ballsLimit: 12,
       pitch,
       rewardXP: level * 20 + 50,
-      rewardCoins: level * 10 + 20
+      rewardCoins: Math.min(60, 15 + level * 2)
     };
   }
 
@@ -2095,11 +2095,11 @@ async function finishMatch(iUnused, player, match, won, runs, balls, fours, sixe
   const tier = getPlayerTier(player.level);
   
   let xpEarned = won ? match.rewardXP : Math.round(match.rewardXP * 0.25);
-  let coinsEarned = won ? match.rewardCoins : 10;
+  let coinsEarned = won ? match.rewardCoins : 5;
 
   const activeContract = db.prepare('SELECT salary_per_match FROM contracts WHERE player_id = ? AND active = 1').get(discordId);
   const baseSalary = activeContract ? activeContract.salary_per_match : tier.stipend;
-  const matchSalary = won ? baseSalary : Math.round(baseSalary * 0.5);
+  const matchSalary = won ? Math.round(baseSalary * 0.4) : Math.round(baseSalary * 0.15);
   
   coinsEarned += matchSalary;
 

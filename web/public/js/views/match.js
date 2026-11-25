@@ -1,4 +1,5 @@
 import { api, esc, formatRichText, toast } from '../api.js';
+import { caIcon } from '../components/icons.js';
 import { renderHawkEyePitchSVG } from '../components/gearSvg.js';
 import { CricketArcadeRenderer, WAGON_ZONES } from '../engine/cricketCanvas.js';
 import { cricketAudio } from '../engine/cricketAudio.js';
@@ -741,8 +742,8 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
           <div class="grid-4" style="max-width:740px;margin:0 auto;gap:10px;">
             <div class="card" style="padding:12px;"><div class="label">Batting</div><div class="stat-big" style="font-size:1.45rem;">${match.batting.runs} (${match.batting.balls}b)</div></div>
             <div class="card" style="padding:12px;"><div class="label">Bowling</div><div class="stat-big" style="font-size:1.45rem;">${match.bowling.wicketsTaken}/${match.bowling.runsConceded}</div></div>
-            <div class="card" style="padding:12px;"><div class="label">XP Earned</div><div class="stat-big" style="font-size:1.45rem;color:var(--cyan);">+${r.xpEarned || 0}</div></div>
-            <div class="card" style="padding:12px;"><div class="label">Coins Earned</div><div class="stat-big" style="font-size:1.45rem;color:var(--gold);">+${r.coinsEarned || 0}</div></div>
+            <div class="card" style="padding:12px;"><div class="label">XP Earned</div><div class="stat-big ic-val" style="font-size:1.45rem;color:var(--cyan);justify-content:center;">${caIcon('skill', 18)} +${r.xpEarned || 0}</div></div>
+            <div class="card" style="padding:12px;"><div class="label">Coins Earned</div><div class="stat-big ic-val" style="font-size:1.45rem;color:var(--gold);justify-content:center;">${caIcon('coin', 18)} +${r.coinsEarned || 0}</div></div>
           </div>
           ${(r.extraNotes || []).length > 0 ? `<div style="margin-top:16px;color:var(--emerald);font-weight:600;">${r.extraNotes.map(n => `<div>• ${esc(n)}</div>`).join('')}</div>` : ''}
         </div>

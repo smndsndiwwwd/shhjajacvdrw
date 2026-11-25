@@ -1,6 +1,7 @@
 import { api, esc, toast, openModal, closeModal } from '../api.js';
+import { caIcon } from '../components/icons.js';
 import { renderGearIconSVG } from '../components/gearSvg.js';
-import { openPlayerProfileModal } from '../components/profileCard.js';
+import { openPlayerProfileModal, openSetProfilePhotoModal } from '../components/profileCard.js';
 
 // ==========================================
 // 1. TRAINING, ACADEMIES & SKILL TREE
@@ -22,10 +23,10 @@ export async function renderTrainingView(container, state, refresh) {
 
         ${tab === 'train' ? `
           <div class="card card-glow-emerald" style="margin-bottom:18px;">
-            <h3>🏋️ Training Facilities</h3>
+            <h3>Training Facilities</h3>
             <p style="color:var(--text-muted);font-size:0.88rem;margin:6px 0 0;">
-              Each drill consumes <strong>25 ⚡ Energy</strong> and <strong>1 🎟️ Training Ticket</strong>. Academy multipliers boost XP &amp; breakthrough odds!
-              Current: <strong>${state.player.energy}/100 ⚡</strong> • <strong>${state.player.training_tokens} 🎟️</strong>
+              Each drill consumes <strong class="ic-val">${caIcon('energy', 14)} 25 Energy</strong> and <strong class="ic-val">${caIcon('ticket', 14)} 1 Training Ticket</strong>. Academy multipliers boost XP &amp; breakthrough odds!
+              Current: <strong class="ic-val">${caIcon('energy', 14)} ${state.player.energy}/100</strong> • <strong class="ic-val">${caIcon('ticket', 14)} ${state.player.training_tokens}</strong>
             </p>
           </div>
           <div id="train-result"></div>
@@ -39,7 +40,7 @@ export async function renderTrainingView(container, state, refresh) {
               <div class="card">
                 <h3>${r.title}</h3>
                 <p style="color:var(--text-muted);font-size:0.86rem;margin:8px 0 14px;">${r.desc}</p>
-                <button class="btn btn-primary train-btn" data-regime="${r.id}">Start Session (25 ⚡ + 1 🎟️)</button>
+                <button class="btn btn-primary train-btn" data-regime="${r.id}"><span class="ic-val">Start Session (${caIcon('energy', 14)} 25 + ${caIcon('ticket', 14)} 1)</span></button>
               </div>
             `).join('')}
           </div>
@@ -49,10 +50,10 @@ export async function renderTrainingView(container, state, refresh) {
           <div class="card card-glow-cyan" style="margin-bottom:18px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <div>
-                <h3>🌟 RPG Skill Tree</h3>
+                <h3 class="ic-val">${caIcon('skill', 18)} RPG Skill Tree</h3>
                 <p style="color:var(--text-muted);font-size:0.86rem;margin:4px 0 0;">Earn Skill Points (+1 per Level Up) to unlock game-changing match abilities.</p>
               </div>
-              <div class="stat-big" style="font-size:1.6rem;color:var(--gold);">${skillsData.skillPoints} SP</div>
+              <div class="stat-big ic-val" style="font-size:1.6rem;color:var(--gold);">${caIcon('skill', 20)} ${skillsData.skillPoints} SP</div>
             </div>
           </div>
           <div class="grid-3">
@@ -283,9 +284,9 @@ export async function renderLockerView(container, state, refresh) {
 
         ${tab === 'shop' ? `
           <div class="card card-glow-gold" style="margin-bottom:16px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <h3>🛒 Pro Gear Catalog</h3>
-              <div class="stat-big" style="font-size:1.5rem;color:var(--gold);">🪙 ${state.player.coins.toLocaleString()} Coins</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+              <h3>Pro Gear Catalog</h3>
+              <div class="stat-big ic-val" style="font-size:1.45rem;color:var(--gold);">${caIcon('coin', 20)} ${state.player.coins.toLocaleString()} Coins</div>
             </div>
           </div>
           <div class="grid-3">
@@ -300,7 +301,7 @@ export async function renderLockerView(container, state, refresh) {
                   ${Object.entries(it.bonuses || {}).map(([k, v]) => `+${v} ${k}`).join(', ')}
                 </div>
                 <button class="btn btn-sm ${it.owned ? 'btn-emerald' : 'btn-primary'} buy-btn" data-id="${it.id}" ${state.player.coins < it.cost ? 'disabled' : ''}>
-                  🪙 Buy for ${it.cost.toLocaleString()} ${it.owned ? '(Owned)' : ''}
+                  <span class="ic-val">${caIcon('coin', 14)} Buy for ${it.cost.toLocaleString()} ${it.owned ? '(Owned)' : ''}</span>
                 </button>
               </div>
             `).join('')}
@@ -501,7 +502,7 @@ export async function renderClubAndStatsView(container, state, refresh) {
               <div class="card ${a.unlocked ? 'card-glow-gold' : ''}" style="opacity:${a.unlocked ? '1' : '0.6'};">
                 <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
                   <span class="badge ${a.unlocked ? 'badge-emerald' : 'badge-muted'}">${a.unlocked ? '✅ Unlocked' : '🔒 Locked'}</span>
-                  <span class="mono" style="color:var(--gold);">+${a.reward_coins} 🪙</span>
+                  <span class="mono ic-val" style="color:var(--gold);">+${a.reward_coins} ${caIcon('coin', 14)}</span>
                 </div>
                 <h4>${esc(a.name)}</h4>
                 <p style="font-size:0.82rem;color:var(--text-muted);margin:6px 0 0;">${esc(a.description)}</p>
@@ -548,9 +549,9 @@ export async function renderClubAndStatsView(container, state, refresh) {
               ${clubData.activeContract ? `
                 <div style="margin:12px 0;font-size:0.9rem;">
                   <div>Club: <strong style="color:var(--gold);">${esc(clubData.activeContract.club_name)}</strong> (${esc(clubData.activeContract.contract_type)})</div>
-                  <div>Salary: <strong style="color:var(--emerald);">🪙 ${clubData.activeContract.salary_per_match} / match</strong> • Remaining: <strong>${clubData.activeContract.remaining_seasons}</strong></div>
+                  <div>Salary: <strong class="ic-val" style="color:var(--emerald);">${caIcon('coin', 14)} ${clubData.activeContract.salary_per_match} / match</strong> • Remaining: <strong>${clubData.activeContract.remaining_seasons}</strong></div>
                 </div>
-              ` : `<p style="color:var(--text-muted);font-size:0.86rem;">Playing on Academy Stipend: 🪙 ${clubData.tier.stipend}/match (${esc(clubData.tier.name)}).</p>`}
+              ` : `<p style="color:var(--text-muted);font-size:0.86rem;">Playing on Academy Stipend: <span class="ic-val">${caIcon('coin', 14)} ${clubData.tier.stipend}/match</span> (${esc(clubData.tier.name)}).</p>`}
               <button class="btn btn-primary" id="btn-req-offers" ${state.player.level < 4 ? 'disabled' : ''}>
                 ${state.player.level < 4 ? 'Unlocks at Level 4' : '📋 Request Club Draft Offers'}
               </button>
@@ -579,6 +580,42 @@ export async function renderClubAndStatsView(container, state, refresh) {
 
         ${tab === 'settings' ? `
           <div class="grid-2">
+            <div class="card card-glow-gold" style="grid-column:1 / -1;">
+              <h3>Cricketer Identity &amp; Photo</h3>
+              <p style="color:var(--text-muted);font-size:0.84rem;margin:4px 0 14px;">Manage your player card photo, display name, and batting stance shown across leaderboards and match broadcasts.</p>
+              <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:14px;">
+                  ${state.player.avatar_url
+                    ? `<img src="${esc(state.player.avatar_url)}" alt="" style="width:68px;height:68px;border-radius:16px;object-fit:cover;border:2px solid rgba(0,229,255,0.45);" />`
+                    : `<div style="width:68px;height:68px;border-radius:16px;background:linear-gradient(135deg,#12294a,#1e4478);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:1.35rem;color:var(--gold);border:2px solid rgba(255,196,0,0.45);">${esc((state.player.name || 'CR').slice(0, 2).toUpperCase())}</div>`
+                  }
+                  <div>
+                    <div style="font-weight:700;font-size:1rem;">${esc(state.player.name)}</div>
+                    <div class="badge badge-cyan" style="margin-top:4px;font-size:0.74rem;">${esc(state.player.public_id || '')}</div>
+                    <div style="margin-top:8px;">
+                      <button class="btn btn-sm btn-primary" id="btn-settings-photo">📷 ${state.player.avatar_url ? 'Change Photo' : 'Set Photo'}</button>
+                    </div>
+                  </div>
+                </div>
+                <div style="flex:1;min-width:230px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end;">
+                  <div>
+                    <label style="display:block;font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Display Name (2–28 chars)</label>
+                    <input class="input" id="set-player-name" maxlength="28" value="${esc(state.player.name || '')}" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Batting Hand</label>
+                    <select class="select" id="set-player-hand">
+                      <option value="Right-hand bat" ${state.player.batting_hand !== 'Left-hand bat' ? 'selected' : ''}>Right-hand bat</option>
+                      <option value="Left-hand bat" ${state.player.batting_hand === 'Left-hand bat' ? 'selected' : ''}>Left-hand bat</option>
+                    </select>
+                  </div>
+                  <div>
+                    <button class="btn btn-emerald" id="btn-save-identity" style="width:100%;">Save Identity</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="card card-glow-cyan">
               <h3>⚙️ Player Preferences</h3>
               <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px;">
@@ -681,6 +718,22 @@ export async function renderClubAndStatsView(container, state, refresh) {
     if (png) png.onclick = async () => {
       await api('/api/settings/update', { method: 'POST', body: { key: 'mention_ping', value: st.mention_ping ? 0 : 1 } });
       await refresh(); paint();
+    };
+    const photoBtn = document.getElementById('btn-settings-photo');
+    if (photoBtn) photoBtn.onclick = () => {
+      openSetProfilePhotoModal(state.player.avatar_url || '', async () => {
+        await refresh(); paint();
+      });
+    };
+    const saveIdBtn = document.getElementById('btn-save-identity');
+    if (saveIdBtn) saveIdBtn.onclick = async () => {
+      const name = document.getElementById('set-player-name')?.value?.trim() || '';
+      const batting_hand = document.getElementById('set-player-hand')?.value || '';
+      if (name.length < 2 || name.length > 28) { toast('Name must be 2–28 characters.', 'error'); return; }
+      try {
+        await api('/api/player/rename', { method: 'POST', body: { name, batting_hand } });
+        await refresh(); toast('Identity updated!', 'success'); paint();
+      } catch (e) { toast(e.message, 'error'); }
     };
     const rst = document.getElementById('set-reset');
     if (rst) rst.onclick = async () => {

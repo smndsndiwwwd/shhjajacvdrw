@@ -692,6 +692,32 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, avatar_url: raw });
   }
 
+  // Edit Cricketer Name & Playing Hand in Settings
+  if (pathname === '/api/player/rename' && req.method === 'POST') {
+    const player = getPlayerOrFail(res, user);
+    if (!player) return true;
+    const body = await parseJsonBody(req);
+    const nextName = String(body.name || '').trim();
+    if (nextName.length < 2 || nextName.length > 28) {
+      return sendJson(res, 400, { error: 'Player name must be 2–28 characters.' });
+    }
+    const nextHand = ['Right-hand bat', 'Left-hand bat'].includes(body.batting_hand)
+      ? body.batting_hand
+      : player.batting_hand;
+
+    db.prepare('UPDATE players SET name = ?, batting_hand = ? WHERE discord_id = ?').run(nextName, nextHand, playerId);
+    recordSystemLog({
+      level: 'INFO',
+      category: 'Career',
+      actor: user.username,
+      target: nextName,
+      title: 'Updated Cricketer Identity',
+      details: { previousName: player.name, nextName, nextHand },
+      ip
+    });
+    return sendJson(res, 200, { ok: true, name: nextName, batting_hand: nextHand });
+  }
+
   if (pathname === '/api/players/profile' && req.method === 'GET') {
     const identifier = query.get('id') || '';
     const target = resolvePlayerByIdentifier(db, identifier);
