@@ -987,6 +987,13 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   background: rgba(8, 13, 27, 0.78);
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
+.train-art-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
 @media (max-width: 960px) {
   .arcade-grid { grid-template-columns: 1fr; }
   .arcade-key-hint { display: none; }

@@ -5,6 +5,7 @@ import { skillTree } from '../game/skills.js';
 import { addXP, updateAndGetEnergy, consumeEnergy } from '../game/utils.js';
 import { emojis } from '../game/emojis.js';
 import { getPlayerSettings } from '../game/settings.js';
+import { executeTrainingDrill } from '../game/trainingProgress.js';
 
 // Load canvas library safely
 let canvasLib = null;
@@ -88,53 +89,26 @@ export async function handleTrain(interaction) {
   await interaction.deferReply();
 
   const regime = interaction.options.getString('regime');
-  
-  // Deduct resources
-  db.prepare('UPDATE players SET training_tokens = training_tokens - 1 WHERE discord_id = ?').run(discordId);
-  consumeEnergy(db, discordId, trainingCostEnergy);
 
   // Show training simulation
   await interaction.editReply({
     content: `⏳ **${player.name}** is heading to the facilities... setting up the drills... 🏃`
   });
 
-  // Fetch player current attributes to calculate diminishing returns
-  const currentAttrs = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(discordId) || {};
-
-  // Calculate training results
   const academy = academies[player.academy_id] || { bonuses: {} };
   const bonuses = academy.bonuses || {};
+  const xpMultiplier = bonuses[regime] || 1.0;
 
-  let baseXP = 50;
-  let xpMultiplier = 1.0;
-  const attrGains = [];
-  const queryUpdates = [];
-
-  // Diminishing returns breakdown function (Hard cap at 99)
-  function rollBreakthrough(currentVal, isPrimary, academyMult = 1.0) {
-    const val = currentVal || 10;
-    if (val >= 99) return 0; // Hard cap at 99
-
-    let baseChance = 0.50;
-    if (val < 45) {
-      baseChance = 0.70;
-    } else if (val < 60) {
-      baseChance = 0.50;
-    } else if (val < 75) {
-      baseChance = 0.32;
-    } else if (val < 85) {
-      baseChance = 0.18;
-    } else if (val < 95) {
-      baseChance = 0.08;
-    } else {
-      baseChance = 0.03;
-    }
-
-    if (!isPrimary) baseChance *= 0.55;
-    baseChance *= academyMult;
-
-    return Math.random() < baseChance ? 1 : 0;
+  let drillRes;
+  try {
+    drillRes = executeTrainingDrill(db, player, regime, xpMultiplier);
+  } catch (err) {
+    return interaction.editReply({ content: `⚠️ ${err.message}` });
   }
+
+  // Deduct resources after verifying daily limit
+  db.prepare('UPDATE players SET training_tokens = training_tokens - 1 WHERE discord_id = ?').run(discordId);
+  consumeEnergy(db, discordId, trainingCostEnergy);
 
   const attrLabels = {
     power: '💥 Power',
@@ -154,68 +128,11 @@ export async function handleTrain(interaction) {
     running: '🏃 Running Speed'
   };
 
-  function testAndApplyGain(attrKey, isPrimary, academyMult) {
-    const currentVal = currentAttrs[attrKey] || 10;
-    const gain = rollBreakthrough(currentVal, isPrimary, academyMult);
-    if (gain > 0) {
-      const newVal = Math.min(99, currentVal + gain);
-      attrGains.push(`${attrLabels[attrKey] || attrKey}: **${currentVal}** ➔ **${newVal}** (+${gain})`);
-      queryUpdates.push(`${attrKey} = MIN(99, ${attrKey} + ${gain})`);
-    }
-  }
-
-  if (regime === 'batting') {
-    xpMultiplier = bonuses.batting || 1.0;
-    const primaryPool = ['timing', 'technique'];
-    const secondaryPool = ['power', 'defense'];
-
-    const primaryAttr = primaryPool[Math.floor(Math.random() * primaryPool.length)];
-    const secondaryAttr = secondaryPool[Math.floor(Math.random() * secondaryPool.length)];
-
-    testAndApplyGain(primaryAttr, true, xpMultiplier);
-    testAndApplyGain(secondaryAttr, false, xpMultiplier);
-  } else if (regime === 'bowling') {
-    xpMultiplier = bonuses.bowling || 1.0;
-    const primaryPool = ['accuracy', 'variations'];
-    const primaryAttr = primaryPool[Math.floor(Math.random() * primaryPool.length)];
-
-    let secondaryAttr = 'swing';
-    if ((player.bowling_style || '').toLowerCase().includes('spin')) {
-      secondaryAttr = 'spin_bowling';
-    } else {
-      secondaryAttr = Math.random() < 0.5 ? 'swing' : 'seam';
-    }
-
-    testAndApplyGain(primaryAttr, true, xpMultiplier);
-    testAndApplyGain(secondaryAttr, false, xpMultiplier);
-  } else if (regime === 'fitness') {
-    xpMultiplier = bonuses.fitness || 1.0;
-    const primaryPool = ['fitness', 'stamina'];
-    const secondaryPool = ['power', 'running'];
-
-    const primaryAttr = primaryPool[Math.floor(Math.random() * primaryPool.length)];
-    const secondaryAttr = secondaryPool[Math.floor(Math.random() * secondaryPool.length)];
-
-    testAndApplyGain(primaryAttr, true, xpMultiplier);
-    testAndApplyGain(secondaryAttr, false, xpMultiplier);
-  } else if (regime === 'fielding') {
-    xpMultiplier = bonuses.fielding || 1.0;
-    const primaryPool = ['fielding', 'reflex'];
-    const secondaryPool = ['running', 'throw_accuracy'];
-
-    const primaryAttr = primaryPool[Math.floor(Math.random() * primaryPool.length)];
-    const secondaryAttr = secondaryPool[Math.floor(Math.random() * secondaryPool.length)];
-
-    testAndApplyGain(primaryAttr, true, xpMultiplier);
-    testAndApplyGain(secondaryAttr, false, xpMultiplier);
-  }
-
+  const attrGains = drillRes.gains.map(g => `${attrLabels[g.key] || g.key}: **${g.from}** ➔ **${g.to}** (+${g.delta})`);
+  const filledBlocks = Math.round(drillRes.newProgress / 10);
+  const progressBar = `${'█'.repeat(filledBlocks)}${'░'.repeat(10 - filledBlocks)} ${drillRes.newProgress}%`;
+  const baseXP = 50;
   const xpReward = Math.round(baseXP * xpMultiplier);
-
-  // Update DB Attributes
-  if (queryUpdates.length > 0) {
-    db.prepare(`UPDATE attributes SET ${queryUpdates.join(', ')} WHERE player_id = ?`).run(discordId);
-  }
 
   // Add XP
   const xpResult = addXP(db, discordId, xpReward);
@@ -226,13 +143,16 @@ export async function handleTrain(interaction) {
       .setTitle(`🏋️ Session Completed: ${regime.toUpperCase()}`)
       .setDescription(
         attrGains.length > 0
-          ? `💪 Solid training session! You pushed through the drills and honed your craft.`
-          : `💪 Hard workout completed! At higher ratings, breakthroughs require repeated drills and patience.`
+          ? `💥 Breakthrough unlocked! You filled the drill bar to 100% and earned an attribute upgrade.`
+          : drillRes.capReached
+            ? `🔒 Drill complete! Attributes for this discipline hit your Level Cap (${drillRes.attrCap}). Level up to unlock higher gains!`
+            : `💪 Solid workout! Progress added toward your next attribute breakthrough.`
       )
       .setColor(attrGains.length > 0 ? '#2ecc71' : '#38bdf8')
       .addFields(
         { name: '✨ Rewards Earned', value: `+${xpReward} XP ${xpMultiplier > 1 ? `(⭐ Academy Buff)` : ''}`, inline: true },
-        { name: '📈 Attribute Breakthroughs', value: attrGains.length > 0 ? attrGains.join('\n') : 'No breakthroughs this session (Diminishing Returns).', inline: true },
+        { name: '📊 Drill Bar & Cap', value: `[${progressBar}] (+${drillRes.gainPct}%)\nSessions Today: **${drillRes.dailyUsed}/${drillRes.dailyLimit}** • Cap: **${drillRes.attrCap}**`, inline: true },
+        { name: '📈 Attribute Breakthroughs', value: attrGains.length > 0 ? attrGains.join('\n') : 'Keep filling the Drill Bar to reach 100%!', inline: false },
         { name: '⚡ Resources Used', value: `Cost: 25 Energy & 1 Ticket\nRemaining Energy: **${currentEnergy - trainingCostEnergy}/100 ${emojis.energy}**\nRemaining Tickets: **${player.training_tokens - 1} ${emojis.token}**`, inline: false }
       );
 

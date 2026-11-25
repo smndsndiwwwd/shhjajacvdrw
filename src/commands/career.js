@@ -13,6 +13,7 @@ import db, { generateUniquePublicId } from '../database/db.js';
 import { academies } from '../game/academies.js';
 import { generateAcademiesForNation } from '../game/nationAcademies.js';
 import { addXP, getLevelRequiredXP, updateAndGetEnergy, getEquipmentBonuses, getEffectiveAttributes } from '../game/utils.js';
+import { getPlayerModeStatsBreakdown } from '../game/statsHelper.js';
 import { emojis } from '../game/emojis.js';
 import { getPlayerSettings } from '../game/settings.js';
 import fs from 'fs';
@@ -1003,12 +1004,10 @@ export async function handleProfile(interaction) {
       drawResourceBox(661, 129, 'TRAIN TICKETS', `${player.training_tokens} Tix`, 'Daily Drills', '#34d399');
 
       // Section: Career Stats Summary Bar (on common graphic card)
-      const pStats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(discordId) || {};
-      const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(discordId)?.c || 0;
-      const dism = Math.max(1, (pStats.matches || 0) - notOuts);
-      const bAvg = (pStats.matches || 0) > 0 ? ((pStats.runs || 0) / dism).toFixed(1) : '0.0';
-      const bSr = (pStats.balls || 0) > 0 ? (((pStats.runs || 0) / pStats.balls) * 100).toFixed(1) : '0.0';
-      const bEcon = (pStats.overs || 0) > 0 ? ((pStats.runs_conceded || 0) / pStats.overs).toFixed(2) : '0.00';
+      const pOv = getPlayerModeStatsBreakdown(db, discordId).overall;
+      const bAvg = pOv.battingAvg;
+      const bSr = pOv.strikeRate;
+      const bEcon = pOv.economy;
 
       ctx.fillStyle = '#38bdf8';
       ctx.font = 'bold 11px sans-serif';
@@ -1017,7 +1016,7 @@ export async function handleProfile(interaction) {
       drawRoundRect(ctx, 385, 384, 405, 42, 8, 'rgba(30, 41, 59, 0.7)', 'rgba(56, 189, 248, 0.3)', 1);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 11.5px sans-serif';
-      ctx.fillText(`M: ${pStats.matches || 0}   Runs: ${pStats.runs || 0} (Avg ${bAvg} | SR ${bSr})   Wkts: ${pStats.wickets || 0} (Econ ${bEcon})`, 398, 410);
+      ctx.fillText(`M: ${pOv.matches} (${pOv.notOuts} NO)   Runs: ${pOv.runs} (Avg ${bAvg} | SR ${bSr})   Wkts: ${pOv.wickets}`, 398, 410);
 
       // Section: Contract
       ctx.fillStyle = '#38bdf8';

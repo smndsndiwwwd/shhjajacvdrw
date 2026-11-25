@@ -957,7 +957,8 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   const balls = match.bat.balls;
   const fours = match.bat.fours;
   const sixes = match.bat.sixes;
-  const dismissal = isForfeit ? 'forfeit' : (match.bat.wickets > 0 ? 'out' : 'not out');
+  const didNotBat = balls === 0 && match.bat.wickets === 0;
+  const dismissal = isForfeit ? 'forfeit' : didNotBat ? 'did not bat' : (match.bat.wickets > 0 ? 'out' : 'not out');
   const bowlingWickets = match.bowl.wicketsTaken;
   const runsConceded = match.bowl.runsConceded;
   const oversBowled = Number((match.bowl.ballsBowled / 6).toFixed(1));

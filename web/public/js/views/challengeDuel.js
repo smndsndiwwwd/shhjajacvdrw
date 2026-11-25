@@ -143,7 +143,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     const curHint = isBatter && duel.status === 'active' ? getCurrentDuelBallHint() : null;
     renderer.updateConfig({
       phase: isBatter ? 'batting' : 'bowling',
-      pitch: 'Flat Belter',
+      pitch: st.pitch || 'Flat Belter',
       fieldPreset: isBatter ? (st.pendingDelivery?.fieldPreset || 'Balanced') : selField,
       isPowerplay: true,
       isLeftHand,
@@ -236,7 +236,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
         <span class="badge ${iWon ? 'badge-emerald' : 'badge-crimson'}">${duel.status === 'expired' ? '⏱️ TIMED OUT' : duel.status === 'forfeited' ? '🏳️ FORFEITED' : iWon ? '🏆 CHALLENGE VICTORY!' : '💔 CHALLENGE DEFEAT'}</span>
         <h2 style="font-size:1.85rem;margin:10px 0 4px;">${esc(winName)}${esc(winTag)} Wins the Duel!</h2>
         <p style="color:var(--text-muted);font-size:0.88rem;margin:0 0 14px;">
-          ${esc(duel.challenger_name)} vs ${esc(duel.opponent_name)} • Final Score: <strong>${st.runs || 0}/${st.wickets || 0}</strong> in <strong>${st.balls || 0}/6 balls</strong> (Target ${st.targetRuns || duel.target_runs})
+          ${esc(duel.challenger_name)} vs ${esc(duel.opponent_name)} • Final Score: <strong>${st.runs || 0}/${st.wickets || 0}</strong> in <strong>${st.balls || 0}/${st.maxBalls || 6} balls</strong> (Max ${st.maxWickets || 1} Wkt • Target ${st.targetRuns || duel.target_runs})
         </p>
         <div class="grid-3" style="max-width:560px;margin:0 auto 14px;gap:10px;">
           <div class="card" style="padding:10px;"><div class="label">Score</div><div class="stat-big" style="font-size:1.3rem;">${st.runs || 0}/${st.wickets || 0}</div></div>
@@ -384,13 +384,14 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <div>
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-                <span class="badge badge-gold">⚔️ LIVE 1-OVER CHALLENGE SHOWDOWN</span>
+                <span class="badge badge-gold">⚔️ LIVE ${st.overs || 1}-OVER PvP SHOWDOWN</span>
+                <span class="badge badge-muted">Max ${st.maxWickets || 1} Wkt${(st.maxWickets || 1) > 1 ? 's' : ''}</span>
                 ${rem ? `<span class="badge badge-crimson mono">⏱️ ${rem}</span>` : ''}
               </div>
               <h2 style="font-size:1.25rem;">${esc(duel.challenger_name)} vs ${esc(duel.opponent_name)}</h2>
             </div>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-              <div class="score-big">${st.runs || 0}/${st.wickets || 0} <span style="font-size:0.95rem;color:var(--cyan);">(${st.balls || 0}/6b • Target ${st.targetRuns || duel.target_runs})</span></div>
+              <div class="score-big">${st.runs || 0}/${st.wickets || 0} <span style="font-size:0.95rem;color:var(--cyan);">(${st.balls || 0}/${st.maxBalls || 6}b • Target ${st.targetRuns || duel.target_runs})</span></div>
               ${duel.status === 'active' ? `<button class="btn btn-danger btn-sm" id="btn-pvp-forfeit">🏳️ Forfeit</button>` : ''}
             </div>
           </div>

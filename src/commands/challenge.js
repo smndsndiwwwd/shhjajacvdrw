@@ -1789,13 +1789,13 @@ async function runPvPSimulation(message, p1Id, p2Id, p1Name, p2Name, resolvedMod
 
     db.prepare(`
       INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
-      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, 'not out', ?, ?, 1.0, ?)
-    `).run(p1Id, p2Name, p1Runs, inn1Score.fours, inn1Score.sixes, inn2Score.wickets, p2Runs, winnerId === p1Id ? 'Won' : 'Lost');
+      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, ?, ?, ?, 1.0, ?)
+    `).run(p1Id, p2Name, p1Runs, inn1Score.fours, inn1Score.sixes, inn1Score.wickets > 0 ? 'out' : 'not out', inn2Score.wickets, p2Runs, winnerId === p1Id ? 'Won' : 'Lost');
 
     db.prepare(`
       INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
-      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, 'not out', ?, ?, 1.0, ?)
-    `).run(p2Id, p1Name, p2Runs, inn2Score.fours, inn2Score.sixes, inn1Score.wickets, p1Runs, winnerId === p2Id ? 'Won' : 'Lost');
+      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, ?, ?, ?, 1.0, ?)
+    `).run(p2Id, p1Name, p2Runs, inn2Score.fours, inn2Score.sixes, inn2Score.wickets > 0 ? 'out' : 'not out', inn1Score.wickets, p1Runs, winnerId === p2Id ? 'Won' : 'Lost');
   } else {
     db.prepare('UPDATE players SET coins = coins + 100, form = MIN(100, form + 5) WHERE discord_id = ?').run(p1Id);
     db.prepare('UPDATE players SET coins = coins + 100, form = MIN(100, form + 5) WHERE discord_id = ?').run(p2Id);
@@ -1809,13 +1809,13 @@ async function runPvPSimulation(message, p1Id, p2Id, p1Name, p2Name, resolvedMod
 
     db.prepare(`
       INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
-      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, 'not out', ?, ?, 1.0, 'Tie')
-    `).run(p1Id, p2Name, p1Runs, inn1Score.fours, inn1Score.sixes, inn2Score.wickets, p2Runs);
+      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, ?, ?, ?, 1.0, 'Tie')
+    `).run(p1Id, p2Name, p1Runs, inn1Score.fours, inn1Score.sixes, inn1Score.wickets > 0 ? 'out' : 'not out', inn2Score.wickets, p2Runs);
 
     db.prepare(`
       INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
-      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, 'not out', ?, ?, 1.0, 'Tie')
-    `).run(p2Id, p1Name, p2Runs, inn2Score.fours, inn2Score.sixes, inn1Score.wickets, p1Runs);
+      VALUES (?, ?, 'Challenge', ?, 6, ?, ?, ?, ?, ?, 1.0, 'Tie')
+    `).run(p2Id, p1Name, p2Runs, inn2Score.fours, inn2Score.sixes, inn2Score.wickets > 0 ? 'out' : 'not out', inn1Score.wickets, p1Runs);
   }
 
   // Final scorecard message

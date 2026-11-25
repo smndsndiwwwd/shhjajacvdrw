@@ -3,6 +3,7 @@ import db from '../database/db.js';
 import { getEquipmentBonuses } from '../game/utils.js';
 import { emojis } from '../game/emojis.js';
 import { getPlayerSettings } from '../game/settings.js';
+import { getPlayerModeStatsBreakdown } from '../game/statsHelper.js';
 
 // Load canvas library safely
 let canvasLib = null;
@@ -39,20 +40,15 @@ export async function handleStats(interaction) {
     return interaction.editReply({ embeds: [errorEmbed] });
   }
 
-  // Batting stats calculations: total runs divided by dismissals
-  const notOutCount = db.prepare("SELECT COUNT(*) as count FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(discordId)?.count || 0;
-  const dismissals = Math.max(1, stats.matches - notOutCount);
-  const battingAvg = stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00';
-  const strikeRate = stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00';
-
-  // Bowling calculations
-  const oversText = stats.overs.toFixed(1);
-  const econ = stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00';
-  const bowlingAvg = stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00';
-
-  // Query best bowling from match history
-  const bestMatch = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(discordId);
-  const bestBowlingText = bestMatch ? `${bestMatch.wickets}/${bestMatch.runs_conceded}` : 'N/A';
+  // Batting & bowling calculations with accurate Not Outs & innings filtering
+  const breakdown = getPlayerModeStatsBreakdown(db, discordId);
+  const ov = breakdown.overall;
+  const battingAvg = ov.battingAvg;
+  const strikeRate = ov.strikeRate;
+  const oversText = ov.overs.toFixed(1);
+  const econ = ov.economy;
+  const bowlingAvg = ov.bowlingAvg;
+  const bestBowlingText = ov.bestBowling;
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`btn_profile_${discordId}`).setLabel('⬅️ Back to Profile').setStyle(ButtonStyle.Primary),
@@ -143,8 +139,8 @@ export async function handleStats(interaction) {
       ctx.textAlign = 'left';
       ctx.fillText('// BATTING RECORD', 50, 150);
 
-      drawStatLine(50, 185, 310, 'Matches Played', String(stats.matches));
-      drawStatLine(50, 220, 310, 'Total Runs Scored', String(stats.runs));
+      drawStatLine(50, 185, 310, 'Matches / Innings', `${ov.matches} / ${ov.innings} (${ov.notOuts} NO)`);
+      drawStatLine(50, 220, 310, 'Total Runs Scored', `${ov.runs} (HS ${ov.highScoreText})`);
       drawStatLine(50, 255, 310, 'Balls Faced', String(stats.balls));
       drawStatLine(50, 290, 310, 'Batting Average', battingAvg);
       drawStatLine(50, 325, 310, 'Strike Rate', `${strikeRate}%`);
@@ -210,7 +206,7 @@ export async function handleStats(interaction) {
     .addFields(
       {
         name: '🏏 Batting Record',
-        value: `**Matches:** ${stats.matches}\n**Runs:** ${stats.runs}\n**Balls Faced:** ${stats.balls}\n**Average:** ${battingAvg}\n**Strike Rate:** ${strikeRate} ⚡\n**Boundary Count:** ${stats.fours}x4 | ${stats.sixes}x6\n**Milestones:** 50s: ${stats.fifties} | 100s: ${stats.hundreds} | Ducks: ${stats.ducks}`,
+        value: `**Matches:** ${ov.matches} | **Inns:** ${ov.innings} (**NO:** ${ov.notOuts})\n**Runs:** ${ov.runs} (HS ${ov.highScoreText})\n**Balls Faced:** ${ov.balls}\n**Average:** ${battingAvg}\n**Strike Rate:** ${strikeRate} ⚡\n**Boundary Count:** ${ov.fours}x4 | ${ov.sixes}x6\n**Milestones:** 50s: ${ov.fifties} | 100s: ${ov.hundreds} | Ducks: ${ov.ducks}`,
         inline: true
       },
       {

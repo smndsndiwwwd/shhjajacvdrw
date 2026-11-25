@@ -97,6 +97,17 @@ db.exec(`
     FOREIGN KEY(player_id) REFERENCES players(discord_id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS training_progress (
+    player_id TEXT NOT NULL,
+    regime TEXT NOT NULL,
+    progress INTEGER DEFAULT 0,
+    daily_count INTEGER DEFAULT 0,
+    last_train_date TEXT DEFAULT '',
+    total_sessions INTEGER DEFAULT 0,
+    PRIMARY KEY(player_id, regime),
+    FOREIGN KEY(player_id) REFERENCES players(discord_id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS match_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id TEXT NOT NULL,

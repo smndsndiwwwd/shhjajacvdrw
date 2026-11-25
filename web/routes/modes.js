@@ -470,8 +470,8 @@ function enrichChallengeRow(database, row) {
       eqBonuses: eq,
       activeSkills: skills,
       bowlerSkill,
-      pitch: 'Flat Belter (Batting Paradise)',
-      bat: { balls: state.balls || 0, ballsLimit: 6 },
+      pitch: state.pitch || 'Flat Belter (Batting Paradise)',
+      bat: { balls: state.balls || 0, ballsLimit: state.maxBalls || 6 },
       nextDelivery: state.pendingDelivery || {}
     }, batter);
   }
@@ -548,7 +548,17 @@ function enrichChallengeRow(database, row) {
 
     const body = await parseJsonBody(req);
     let opponentId = String(body.opponent_id || '').trim();
-    const targetRuns = Math.min(36, Math.max(6, Number(body.target_runs) || 15));
+    const overs = Math.min(5, Math.max(1, Math.round(Number(body.overs) || 1)));
+    const maxBalls = overs * 6;
+    const maxWickets = Math.min(5, Math.max(1, Math.round(Number(body.max_wickets) || 1)));
+    const targetRuns = Math.min(150, Math.max(6, Math.round(Number(body.target_runs) || 15)));
+    const allowedPitches = [
+      'Flat Belter (Batting Paradise)',
+      'Balanced Sporting Pitch',
+      'Green Seamer (Swing & Pace)',
+      'Dusty Turn (Spin Paradise)'
+    ];
+    const pitch = allowedPitches.includes(String(body.pitch || '')) ? String(body.pitch) : 'Flat Belter (Batting Paradise)';
     if (!opponentId || opponentId === 'ai_rival') {
       return sendJson(res, 400, { error: 'Challenge Mode is PvP only! Select a registered player to challenge.' });
     }
@@ -583,6 +593,10 @@ function enrichChallengeRow(database, row) {
       batterId,
       bowlerId,
       targetRuns,
+      maxWickets,
+      maxBalls,
+      overs,
+      pitch,
       runs: 0,
       balls: 0,
       wickets: 0,
@@ -591,7 +605,7 @@ function enrichChallengeRow(database, row) {
       freeHit: false,
       pendingDelivery: null,
       pendingShot: null,
-      log: [`PvP Challenge issued! Target: ${targetRuns} runs in 1 Over (6 balls).`]
+      log: [`PvP Challenge issued! Target: ${targetRuns} runs in ${overs} Over${overs > 1 ? 's' : ''} (${maxBalls}b) • Max ${maxWickets} Wkt${maxWickets > 1 ? 's' : ''} • Pitch: ${pitch}.`]
     };
 
     db.prepare(`
@@ -733,20 +747,23 @@ function enrichChallengeRow(database, row) {
         bowlerSkill = Math.round(((oppAttrs.accuracy || 25) + (oppAttrs.swing || 25)) / 2);
       }
 
+      const duelPitch = state.pitch || 'Flat Belter (Batting Paradise)';
+      const maxBalls = state.maxBalls || 6;
+      const maxWickets = state.maxWickets || 1;
       const timingProfile = computeTimingProfile({
         playerId,
         playerAttrs: attrs,
         eqBonuses: eq,
         activeSkills: skills,
         bowlerSkill,
-        pitch: 'Flat Belter (Batting Paradise)',
-        bat: { balls: state.balls || 0, ballsLimit: 6 },
+        pitch: duelPitch,
+        bat: { balls: state.balls || 0, ballsLimit: maxBalls },
         nextDelivery: deliv
       }, player);
       const parsedNeedle = (needlePos !== null && needlePos !== undefined && needlePos !== '') ? Number(needlePos) : null;
       const timing = isLeave
         ? 'Perfect'
-        : resolveBattingTiming(timingQuality, parsedNeedle, timingProfile, player.confidence, skills, (6 - (state.balls || 0)) <= 2);
+        : resolveBattingTiming(timingQuality, parsedNeedle, timingProfile, player.confidence, skills, (maxBalls - (state.balls || 0)) <= 3);
 
       const sim = simulateBallAdvanced({
         bowlerInput: deliv,
@@ -759,7 +776,7 @@ function enrichChallengeRow(database, row) {
         bowlerSkill,
         isFreeHit: state.freeHit,
         isPowerplay: true,
-        pitch: 'Flat Belter (Batting Paradise)'
+        pitch: duelPitch
       });
 
       state.runs += sim.runs;
@@ -789,7 +806,7 @@ function enrichChallengeRow(database, row) {
       state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)', state.aiBowlerType || 'pace') : null;
 
       const batterWon = state.runs >= state.targetRuns;
-      const bowlerWon = state.wickets >= 1 || (state.balls >= 6 && state.runs < state.targetRuns);
+      const bowlerWon = state.wickets >= maxWickets || (state.balls >= maxBalls && state.runs < state.targetRuns);
 
       if (batterWon || bowlerWon) {
         const winnerId = batterWon ? state.batterId : state.bowlerId;
@@ -801,10 +818,23 @@ function enrichChallengeRow(database, row) {
         db.prepare('UPDATE challenge_stats SET played=played+1, won=won+?, lost=lost+?, runs=runs+?, fours=fours+?, sixes=sixes+? WHERE player_id=?')
           .run(batterWon ? 1 : 0, batterWon ? 0 : 1, state.runs, state.fours, state.sixes, state.batterId);
 
+        const batterRow = db.prepare('SELECT name FROM players WHERE discord_id = ?').get(state.batterId);
+        const bowlerRow = db.prepare('SELECT name FROM players WHERE discord_id = ?').get(state.bowlerId);
+        const oversStr = Number((state.balls / 6).toFixed(1));
+        const batDismissal = state.wickets > 0 ? 'out' : 'not out';
+        db.prepare(`
+          INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
+          VALUES (?, ?, 'Challenge', ?, ?, ?, ?, ?, 0, 0, 0, ?)
+        `).run(state.batterId, bowlerRow?.name || 'PvP Rival', state.runs, state.balls, state.fours, state.sixes, batDismissal, batterWon ? 'Won' : 'Lost');
+
         if (state.bowlerId !== 'ai_rival') {
           db.prepare('INSERT OR IGNORE INTO challenge_stats (player_id) VALUES (?)').run(state.bowlerId);
           db.prepare('UPDATE challenge_stats SET played=played+1, won=won+?, lost=lost+?, wickets=wickets+? WHERE player_id=?')
             .run(bowlerWon ? 1 : 0, bowlerWon ? 0 : 1, state.wickets, state.bowlerId);
+          db.prepare(`
+            INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
+            VALUES (?, ?, 'Challenge', 0, 0, 0, 0, 'did not bat', ?, ?, ?, ?)
+          `).run(state.bowlerId, batterRow?.name || 'PvP Rival', state.wickets, state.runs, oversStr, bowlerWon ? 'Won' : 'Lost');
         }
 
         if (winnerId !== 'ai_rival') {

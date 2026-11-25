@@ -1,6 +1,6 @@
 import { api, esc, toast, openModal, closeModal } from '../api.js';
 import { caIcon } from '../components/icons.js';
-import { renderGearIconSVG } from '../components/gearSvg.js';
+import { renderGearIconSVG, renderTrainingSVG } from '../components/gearSvg.js';
 import { openPlayerProfileModal, openSetProfilePhotoModal } from '../components/profileCard.js';
 
 // ==========================================
@@ -8,11 +8,17 @@ import { openPlayerProfileModal, openSetProfilePhotoModal } from '../components/
 // ==========================================
 export async function renderTrainingView(container, state, refresh) {
   let tab = 'train'; // 'train' | 'skills' | 'academy'
-  const skillsData = await api('/api/skills');
+  let lastTrainRes = null;
   let selectedNation = state.player.nationality || 'India';
-  let acadData = await api(`/api/academies?nation=${encodeURIComponent(selectedNation)}`);
+  let [skillsData, trainStatus, acadData] = await Promise.all([
+    api('/api/skills'),
+    api('/api/train/status'),
+    api(`/api/academies?nation=${encodeURIComponent(selectedNation)}`)
+  ]);
 
   const paint = () => {
+    const cap = trainStatus?.attrCap || Math.min(99, 25 + (state.player.level || 1) * 3);
+    const regs = trainStatus?.regimes || {};
     container.innerHTML = `
       <div>
         <div class="subtabs">
@@ -23,26 +29,75 @@ export async function renderTrainingView(container, state, refresh) {
 
         ${tab === 'train' ? `
           <div class="card card-glow-emerald" style="margin-bottom:18px;">
-            <h3>Training Facilities</h3>
-            <p style="color:var(--text-muted);font-size:0.88rem;margin:6px 0 0;">
-              Each drill consumes <strong class="ic-val">${caIcon('energy', 14)} 25 Energy</strong> and <strong class="ic-val">${caIcon('ticket', 14)} 1 Training Ticket</strong>. Academy multipliers boost XP &amp; breakthrough odds!
-              Current: <strong class="ic-val">${caIcon('energy', 14)} ${state.player.energy}/100</strong> • <strong class="ic-val">${caIcon('ticket', 14)} ${state.player.training_tokens}</strong>
-            </p>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+              <div>
+                <h3>Training Facilities</h3>
+                <p style="color:var(--text-muted);font-size:0.86rem;margin:6px 0 0;">
+                  Each drill costs <strong class="ic-val">${caIcon('energy', 14)} 25 Energy</strong> + <strong class="ic-val">${caIcon('ticket', 14)} 1 Ticket</strong> and fills that discipline&apos;s <strong>Drill Bar</strong> toward a <strong>+1 attribute breakthrough at 100%</strong>.
+                </p>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <span class="badge badge-cyan ic-val">${caIcon('energy', 13)} ${state.player.energy}/100</span>
+                <span class="badge badge-gold ic-val">${caIcon('ticket', 13)} ${state.player.training_tokens} Tix</span>
+                <span class="badge badge-emerald">Level Cap: ${cap}/99</span>
+                <span class="badge badge-muted">Limit: ${trainStatus?.dailyLimit || 5}/day per drill</span>
+              </div>
+            </div>
           </div>
-          <div id="train-result"></div>
+
+          <div id="train-result">
+            ${lastTrainRes ? `
+              <div class="card card-glow-cyan" style="margin-bottom:16px;">
+                <strong>${lastTrainRes.breakthrough ? '💥 Breakthrough Unlocked!' : '✅ Workout Logged'} (+${lastTrainRes.xpEarned} XP • +${lastTrainRes.gainPct}% Drill Bar)</strong>
+                <div style="margin-top:6px;font-size:0.86rem;">
+                  ${lastTrainRes.gains?.length > 0
+                    ? lastTrainRes.gains.map(g => `• <strong>${esc(g.key.replace('_', ' '))}</strong>: ${g.from} ➔ ${g.to} (+${g.delta})`).join('<br/>')
+                    : lastTrainRes.capReached
+                      ? `• All attributes for this drill reached your Level ${state.player.level} cap (${lastTrainRes.attrCap}). Level up to raise your ceiling!`
+                      : `• Drill Mastery is now at <strong>${lastTrainRes.newProgress}%</strong> (${100 - lastTrainRes.newProgress}% until next +1 breakthrough).`}
+                  ${lastTrainRes.levelUp ? `<br/>🎉 <strong>Level Up! Reached Level ${lastTrainRes.newLevel}!</strong>` : ''}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+
           <div class="grid-2">
             ${[
-              { id: 'batting', title: '🏏 Nets Batting Practice', desc: 'Boosts Timing, Technique, Power, Defense & grants Batting XP.' },
-              { id: 'bowling', title: '🥎 Target Bowling Drills', desc: 'Boosts Accuracy, Variations, Swing/Seam or Spin Craft.' },
-              { id: 'fitness', title: '💪 Gym & Conditioning', desc: 'Boosts Fitness, Stamina, Power & Running Speed.' },
-              { id: 'fielding', title: '🧤 Sprinting & Fielding Drills', desc: 'Boosts Fielding, Reflexes, Throw Accuracy & Running.' }
-            ].map(r => `
-              <div class="card">
-                <h3>${r.title}</h3>
-                <p style="color:var(--text-muted);font-size:0.86rem;margin:8px 0 14px;">${r.desc}</p>
-                <button class="btn btn-primary train-btn" data-regime="${r.id}"><span class="ic-val">Start Session (${caIcon('energy', 14)} 25 + ${caIcon('ticket', 14)} 1)</span></button>
-              </div>
-            `).join('')}
+              { id: 'batting', title: 'Nets Batting Practice', desc: 'Builds Timing, Technique, Power & Defense toward your next batting breakthrough.' },
+              { id: 'bowling', title: 'Target Bowling Drills', desc: 'Builds Accuracy, Variations & Swing/Seam/Spin craft through pinpoint spot practice.' },
+              { id: 'fitness', title: 'Gym & Conditioning', desc: 'Builds Fitness, Stamina, Power & Sprint Endurance under structured load limits.' },
+              { id: 'fielding', title: 'Sprinting & Fielding Drills', desc: 'Sharpens Fielding, Reflexes, Throw Accuracy & Sprint Speed on the reaction wall.' }
+            ].map(r => {
+              const info = regs[r.id] || { progress: 0, dailyUsed: 0, dailyLimit: 5, attrCap: cap, allCapped: false, attrs: {} };
+              const maxedToday = info.dailyUsed >= info.dailyLimit;
+              return `
+                <div class="card">
+                  ${renderTrainingSVG(r.id)}
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                    <h3 style="margin:0;">${r.title}</h3>
+                    <span class="badge ${maxedToday ? 'badge-crimson' : 'badge-muted'}">Today: ${info.dailyUsed}/${info.dailyLimit}</span>
+                  </div>
+                  <p style="color:var(--text-muted);font-size:0.84rem;margin:0 0 10px;">${r.desc}</p>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+                    ${Object.entries(info.attrs || {}).map(([k, v]) => `
+                      <span class="badge ${v >= info.attrCap ? 'badge-gold' : 'badge-cyan'}" style="font-size:0.72rem;">${esc(k.replace('_', ' '))}: ${v}/${info.attrCap}</span>
+                    `).join('')}
+                  </div>
+                  <div style="margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;font-size:0.76rem;color:var(--text-muted);margin-bottom:4px;">
+                      <span>Drill Breakthrough Bar</span>
+                      <strong class="mono" style="color:${info.allCapped ? 'var(--gold)' : 'var(--emerald)'};">${info.progress}% ${info.allCapped ? '(AT LEVEL CAP)' : '/ 100%'}</strong>
+                    </div>
+                    <div class="progress-track" style="height:8px;">
+                      <div class="progress-fill" style="width:${info.progress}%;"></div>
+                    </div>
+                  </div>
+                  <button class="btn btn-primary train-btn" data-regime="${r.id}" ${maxedToday ? 'disabled' : ''}>
+                    <span class="ic-val">${maxedToday ? 'Daily Limit Reached (5/5)' : `Start Drill (${caIcon('energy', 14)} 25 + ${caIcon('ticket', 14)} 1)`}</span>
+                  </button>
+                </div>
+              `;
+            }).join('')}
           </div>
         ` : ''}
 
@@ -115,25 +170,16 @@ export async function renderTrainingView(container, state, refresh) {
     `;
 
     document.querySelectorAll('.subtab').forEach(b => b.onclick = () => { tab = b.dataset.t; paint(); });
+    document.querySelectorAll('.stat-mode-btn').forEach(b => b.onclick = () => { statMode = b.dataset.mode; paint(); });
 
     document.querySelectorAll('.train-btn').forEach(b => b.onclick = async () => {
       try {
         const res = await api('/api/train', { method: 'POST', body: { regime: b.dataset.regime } });
-        toast(`Training complete! +${res.xpEarned} XP`, 'success');
+        lastTrainRes = res;
+        if (res.trainingStatus) trainStatus = res.trainingStatus;
+        toast(res.breakthrough ? `Breakthrough +1! (+${res.xpEarned} XP)` : `Drill logged (+${res.gainPct}% bar, +${res.xpEarned} XP)`, 'success');
         await refresh();
         paint();
-        const box = document.getElementById('train-result');
-        if (box) {
-          box.innerHTML = `
-            <div class="card card-glow-cyan" style="margin-bottom:16px;">
-              <strong>✅ Session Complete (+${res.xpEarned} XP)</strong>
-              <div style="margin-top:6px;font-size:0.86rem;">
-                ${res.gains.length > 0 ? res.gains.map(g => `• <strong>${esc(g.key)}</strong>: ${g.from} ➔ ${g.to} (+${g.delta})`).join('<br/>') : '• Great workout! Solidified form and earned XP.'}
-                ${res.levelUp ? `<br/>🎉 <strong>Level Up! Reached Level ${res.newLevel}!</strong>` : ''}
-              </div>
-            </div>
-          `;
-        }
       } catch {}
     });
 
@@ -359,6 +405,7 @@ export async function renderLockerView(container, state, refresh) {
     `;
 
     document.querySelectorAll('.subtab').forEach(b => b.onclick = () => { tab = b.dataset.t; paint(); });
+    document.querySelectorAll('.stat-mode-btn').forEach(b => b.onclick = () => { statMode = b.dataset.mode; paint(); });
     document.querySelectorAll('.inv-filter-btn').forEach(b => b.onclick = () => { invFilter = b.dataset.cat; paint(); });
 
     document.querySelectorAll('.equip-btn').forEach(b => b.onclick = async () => {
@@ -412,6 +459,7 @@ export async function renderLockerView(container, state, refresh) {
 // ==========================================
 export async function renderClubAndStatsView(container, state, refresh, initialTab = 'stats') {
   let tab = initialTab || 'stats'; // 'stats' | 'history' | 'achievements' | 'leaderboard' | 'club' | 'settings'
+  let statMode = 'overall'; // 'overall' | 'chapter' | 'practice' | 'tournament' | 'franchise' | 'challenge'
   let lbType = 'level';
   const [clubData, statsData, lbData] = await Promise.all([
     api('/api/club'),
@@ -420,14 +468,24 @@ export async function renderClubAndStatsView(container, state, refresh, initialT
   ]);
 
   const paint = () => {
-    const s = statsData.stats;
-    const c = statsData.computed;
+    const s = statsData.stats || {};
+    const c = statsData.computed || {};
+    const modesMap = statsData.modes || {};
+    const modeLabels = [
+      { id: 'overall', label: '🌐 Overall' },
+      { id: 'chapter', label: '📖 Chapter' },
+      { id: 'practice', label: '⚡ Practice' },
+      { id: 'tournament', label: '🏆 Tournament' },
+      { id: 'franchise', label: '🏟️ Franchise' },
+      { id: 'challenge', label: '⚔️ Challenge PvP' }
+    ];
+    const activeStat = statMode === 'overall' ? c : (modesMap[statMode] || c);
     const st = state.settings;
 
     container.innerHTML = `
       <div>
         <div class="subtabs">
-          <button class="subtab ${tab === 'stats' ? 'active' : ''}" data-t="stats">📊 Lifetime Stats</button>
+          <button class="subtab ${tab === 'stats' ? 'active' : ''}" data-t="stats">📊 Mode &amp; Lifetime Stats</button>
           <button class="subtab ${tab === 'history' ? 'active' : ''}" data-t="history">📜 Match History</button>
           <button class="subtab ${tab === 'achievements' ? 'active' : ''}" data-t="achievements">🏅 Achievements</button>
           <button class="subtab ${tab === 'leaderboard' ? 'active' : ''}" data-t="leaderboard">🌍 Leaderboards</button>
@@ -436,39 +494,73 @@ export async function renderClubAndStatsView(container, state, refresh, initialT
         </div>
 
         ${tab === 'stats' ? `
-          <div class="grid-3">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+            ${modeLabels.map(m => `<button class="btn btn-sm ${statMode === m.id ? 'btn-primary' : ''} stat-mode-btn" data-mode="${m.id}">${m.label}</button>`).join('')}
+          </div>
+
+          <div class="grid-3" style="margin-bottom:18px;">
             <div class="card card-glow-cyan">
-              <h3 style="margin-bottom:12px;color:var(--cyan);">🏏 Batting Record</h3>
+              <h3 style="margin-bottom:12px;color:var(--cyan);">🏏 Batting Record (${esc(modeLabels.find(m => m.id === statMode)?.label || 'Overall')})</h3>
               <div style="display:flex;flex-direction:column;gap:8px;font-size:0.88rem;">
-                <div style="display:flex;justify-content:space-between;"><span>Matches</span><strong class="mono">${s.matches}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Runs Scored</span><strong class="mono">${s.runs}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Balls Faced</span><strong class="mono">${s.balls}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Average</span><strong class="mono">${c.battingAvg}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Strike Rate</span><strong class="mono">${c.strikeRate}%</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>4s / 6s</span><strong class="mono">${s.fours} / ${s.sixes}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>50s / 100s / Ducks</span><strong class="mono">${s.fifties} / ${s.hundreds} / ${s.ducks}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Matches / Innings</span><strong class="mono">${activeStat.matches ?? 0} / ${activeStat.innings ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Not Outs (NO)</span><strong class="mono" style="color:var(--emerald);">${activeStat.notOuts ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Runs Scored</span><strong class="mono">${activeStat.runs ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>High Score (HS)</span><strong class="mono" style="color:var(--gold);">${esc(activeStat.highScoreText || String(activeStat.highScore || 0))}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Batting Average</span><strong class="mono">${esc(activeStat.battingAvg || '0.00')}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Strike Rate</span><strong class="mono">${activeStat.strikeRate || '0.00'}%</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>4s / 6s</span><strong class="mono">${activeStat.fours ?? 0} / ${activeStat.sixes ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>50s / 100s / Ducks</span><strong class="mono">${activeStat.fifties ?? 0} / ${activeStat.hundreds ?? 0} / ${activeStat.ducks ?? 0}</strong></div>
               </div>
             </div>
             <div class="card card-glow-emerald">
               <h3 style="margin-bottom:12px;color:var(--emerald);">🥎 Bowling Record</h3>
               <div style="display:flex;flex-direction:column;gap:8px;font-size:0.88rem;">
-                <div style="display:flex;justify-content:space-between;"><span>Wickets Taken</span><strong class="mono">${s.wickets}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Overs Bowled</span><strong class="mono">${Number(s.overs || 0).toFixed(1)}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Runs Conceded</span><strong class="mono">${s.runs_conceded}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Economy Rate</span><strong class="mono">${c.economy}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Bowling Avg</span><strong class="mono">${c.bowlingAvg}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Best Figures</span><strong class="mono">${esc(c.bestBowling)}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Wickets Taken</span><strong class="mono">${activeStat.wickets ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Overs Bowled</span><strong class="mono">${Number(activeStat.overs || 0).toFixed(1)}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Runs Conceded</span><strong class="mono">${activeStat.runsConceded ?? 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Economy Rate</span><strong class="mono">${activeStat.economy || '0.00'}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Bowling Avg</span><strong class="mono">${activeStat.bowlingAvg || '0.00'}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Best Figures</span><strong class="mono">${esc(activeStat.bestBowling || 'N/A')}</strong></div>
               </div>
             </div>
             <div class="card card-glow-gold">
-              <h3 style="margin-bottom:12px;color:var(--gold);">🧤 Fielding &amp; Titles</h3>
+              <h3 style="margin-bottom:12px;color:var(--gold);">🏆 Form, Fielding &amp; Titles</h3>
               <div style="display:flex;flex-direction:column;gap:8px;font-size:0.88rem;">
-                <div style="display:flex;justify-content:space-between;"><span>Catches</span><strong class="mono">${s.catches}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Run Outs</span><strong class="mono">${s.run_outs}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Stumpings</span><strong class="mono">${s.stumpings}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Matches Won</span><strong class="mono">${activeStat.won ?? 0} (${activeStat.winRate ?? 0}%)</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Catches</span><strong class="mono">${s.catches || 0}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Run Outs / Stumpings</span><strong class="mono">${s.run_outs || 0} / ${s.stumpings || 0}</strong></div>
                 <div style="display:flex;justify-content:space-between;"><span>Franchise Titles</span><strong class="mono">${state.player.franchise_titles || 0}</strong></div>
-                <div style="display:flex;justify-content:space-between;"><span>Tournaments Won</span><strong class="mono">${(state.tournamentsWon || []).reduce((a, x) => a + x.won, 0)}</strong></div>
+                <div style="display:flex;justify-content:space-between;"><span>Tournament Cups</span><strong class="mono">${(state.tournamentsWon || []).reduce((a, x) => a + x.won, 0)}</strong></div>
               </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-bottom:12px;">📋 All-Modes Statistical Breakdown</h3>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Mode</th><th>M</th><th>Inns</th><th>NO</th><th>Runs</th><th>HS</th><th>Avg</th><th>SR</th><th>Wkts</th><th>Econ</th><th>Win%</th></tr></thead>
+                <tbody>
+                  ${modeLabels.map(m => {
+                    const ms = m.id === 'overall' ? c : (modesMap[m.id] || {});
+                    return `
+                      <tr>
+                        <td><strong>${m.label}</strong></td>
+                        <td class="mono">${ms.matches ?? 0}</td>
+                        <td class="mono">${ms.innings ?? 0}</td>
+                        <td class="mono" style="color:var(--emerald);">${ms.notOuts ?? 0}</td>
+                        <td class="mono">${ms.runs ?? 0}</td>
+                        <td class="mono" style="color:var(--gold);">${esc(ms.highScoreText || String(ms.highScore || 0))}</td>
+                        <td class="mono">${esc(ms.battingAvg || '0.00')}</td>
+                        <td class="mono">${ms.strikeRate || '0.00'}</td>
+                        <td class="mono">${ms.wickets ?? 0}</td>
+                        <td class="mono">${ms.economy || '0.00'}</td>
+                        <td class="mono">${ms.winRate ?? 0}%</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
             </div>
           </div>
         ` : ''}
@@ -657,6 +749,7 @@ export async function renderClubAndStatsView(container, state, refresh, initialT
     `;
 
     document.querySelectorAll('.subtab').forEach(b => b.onclick = () => { tab = b.dataset.t; paint(); });
+    document.querySelectorAll('.stat-mode-btn').forEach(b => b.onclick = () => { statMode = b.dataset.mode; paint(); });
     document.querySelectorAll('.lb-btn').forEach(b => b.onclick = async () => {
       lbType = b.dataset.type;
       const d = await api(`/api/leaderboard?type=${lbType}`);

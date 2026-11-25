@@ -450,9 +450,33 @@ export async function renderChallengeView(container, state, refresh) {
                 }
               </select>
             </div>
-            <div>
-              <label class="label">Target Runs (6–36)</label>
-              <input id="chal-target" class="input" type="number" min="6" max="36" value="15" />
+            <div class="grid-2" style="gap:10px;">
+              <div>
+                <label class="label">Target Runs (6–150)</label>
+                <input id="chal-target" class="input" type="number" min="6" max="150" value="15" />
+              </div>
+              <div>
+                <label class="label">Max Wickets (1–5)</label>
+                <input id="chal-wickets" class="input" type="number" min="1" max="5" value="1" />
+              </div>
+              <div>
+                <label class="label">Match Length (1–5 Overs)</label>
+                <select id="chal-overs" class="select">
+                  <option value="1" selected>1 Over (6 balls)</option>
+                  <option value="2">2 Overs (12 balls)</option>
+                  <option value="3">3 Overs (18 balls)</option>
+                  <option value="5">5 Overs (30 balls)</option>
+                </select>
+              </div>
+              <div>
+                <label class="label">Pitch Condition</label>
+                <select id="chal-pitch" class="select">
+                  <option value="Flat Belter (Batting Paradise)" selected>Flat Belter</option>
+                  <option value="Balanced Sporting Pitch">Balanced Sporting</option>
+                  <option value="Green Seamer (Swing & Pace)">Green Seamer</option>
+                  <option value="Dusty Turn (Spin Paradise)">Dusty Turn</option>
+                </select>
+              </div>
             </div>
             ${myOngoingChallenge ? `
               <div style="padding:10px 12px;border-radius:10px;background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);font-size:0.82rem;color:#fecdd3;">
@@ -585,7 +609,10 @@ export async function renderChallengeView(container, state, refresh) {
     const opponent_id = document.getElementById('chal-opp').value;
     if (!opponent_id) { toast('Select a human player to challenge!', 'error'); return; }
     const target_runs = Number(document.getElementById('chal-target').value) || 15;
-    await api('/api/challenge/create', { method: 'POST', body: { opponent_id, target_runs } });
+    const max_wickets = Number(document.getElementById('chal-wickets').value) || 1;
+    const overs = Number(document.getElementById('chal-overs').value) || 1;
+    const pitch = document.getElementById('chal-pitch').value || 'Flat Belter (Batting Paradise)';
+    await api('/api/challenge/create', { method: 'POST', body: { opponent_id, target_runs, max_wickets, overs, pitch } });
     toast('Challenge duel created!', 'success');
     if (arenaCleanup) { arenaCleanup(); arenaCleanup = null; }
     renderChallengeView(container, state, refresh);

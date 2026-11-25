@@ -128,3 +128,117 @@ export function renderHawkEyePitchSVG({ delivery = null, lengthOnly = false, bat
     </svg>
   `;
 }
+
+/**
+ * Custom Facility Graphics for Each Training Feature (Batting Nets, Bowling Lab, Gym Conditioning, Fielding Reaction)
+ */
+export function renderTrainingSVG(regime = 'batting') {
+  if (regime === 'batting') {
+    return `
+      <svg viewBox="0 0 280 110" class="train-art-svg">
+        <defs>
+          <linearGradient id="tr-bat-bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0a1c2e"/><stop offset="100%" stop-color="#06291e"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="110" rx="10" fill="url(#tr-bat-bg)" stroke="rgba(16,185,129,0.32)"/>
+        <!-- Net mesh perspective -->
+        <path d="M22 18 L92 34 L92 86 L22 96 Z" fill="rgba(148,163,184,0.08)" stroke="rgba(148,163,184,0.32)" stroke-dasharray="4 3"/>
+        <path d="M258 18 L188 34 L188 86 L258 96 Z" fill="rgba(148,163,184,0.08)" stroke="rgba(148,163,184,0.32)" stroke-dasharray="4 3"/>
+        <!-- Pitch Strip -->
+        <polygon points="92,36 188,36 218,98 62,98" fill="#c7a974" stroke="#8c6d3f"/>
+        <line x1="80" y1="82" x2="200" y2="82" stroke="#f8fafc" stroke-width="1.6"/>
+        <!-- Bowling Machine -->
+        <rect x="128" y="24" width="24" height="15" rx="4" fill="#334155" stroke="#38bdf8"/>
+        <circle cx="135" cy="31" r="4" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+        <circle cx="145" cy="31" r="4" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+        <!-- Stumps -->
+        <g stroke="#f59e0b" stroke-width="2">
+          <line x1="134" y1="68" x2="134" y2="86"/><line x1="140" y1="68" x2="140" y2="86"/><line x1="146" y1="68" x2="146" y2="86"/>
+        </g>
+        <!-- Ball Arc & Crack -->
+        <path d="M140 34 Q124 64 156 76" fill="none" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4 3"/>
+        <path d="M156 76 Q192 48 228 32" fill="none" stroke="#34d399" stroke-width="2.4"/>
+        <circle cx="228" cy="32" r="4.5" fill="#f8fafc" stroke="#ef4444" stroke-width="1.3"/>
+        <path d="M158 66 L168 58 M161 73 L173 70 M153 64 L156 54" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
+      </svg>`;
+  }
+  if (regime === 'bowling') {
+    return `
+      <svg viewBox="0 0 280 110" class="train-art-svg">
+        <defs>
+          <linearGradient id="tr-bowl-bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#17122b"/><stop offset="100%" stop-color="#091a2e"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="110" rx="10" fill="url(#tr-bowl-bg)" stroke="rgba(244,63,94,0.35)"/>
+        <!-- Pitch Strip + Length Zones -->
+        <rect x="44" y="20" width="136" height="72" rx="6" fill="#c7a974" stroke="#8c6d3f"/>
+        <rect x="44" y="44" width="38" height="48" fill="rgba(56,189,248,0.22)"/>
+        <rect x="82" y="44" width="44" height="48" fill="rgba(16,185,129,0.22)"/>
+        <rect x="126" y="44" width="34" height="48" fill="rgba(245,158,11,0.25)"/>
+        <!-- Target Bullseye & Stumps -->
+        <circle cx="114" cy="56" r="11" fill="rgba(244,63,94,0.24)" stroke="#fb7185" stroke-width="1.6"/>
+        <circle cx="114" cy="56" r="4.5" fill="#f43f5e"/>
+        <g stroke="#fbbf24" stroke-width="2.2">
+          <line x1="168" y1="42" x2="168" y2="70"/><line x1="173" y1="42" x2="173" y2="70"/><line x1="178" y1="42" x2="178" y2="70"/>
+        </g>
+        <!-- Swing Curve Trajectory -->
+        <path d="M52 50 Q86 68 114 56 Q142 46 173 46" fill="none" stroke="#38bdf8" stroke-width="2.4"/>
+        <circle cx="52" cy="50" r="4.5" fill="#f43f5e" stroke="#fff" stroke-width="1"/>
+        <!-- Speed Gun / Seam Meter Panel -->
+        <rect x="194" y="22" width="70" height="66" rx="8" fill="#0f172a" stroke="rgba(56,189,248,0.45)"/>
+        <text x="229" y="42" fill="#94a3b8" font-size="8" font-family="JetBrains Mono" text-anchor="middle">SPEED GUN</text>
+        <text x="229" y="61" fill="#38bdf8" font-size="15" font-weight="800" font-family="Chakra Petch, sans-serif" text-anchor="middle">144</text>
+        <text x="229" y="74" fill="#34d399" font-size="8" font-family="JetBrains Mono" text-anchor="middle">KPH • INSWING</text>
+      </svg>`;
+  }
+  if (regime === 'fitness') {
+    return `
+      <svg viewBox="0 0 280 110" class="train-art-svg">
+        <defs>
+          <linearGradient id="tr-fit-bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#19160a"/><stop offset="100%" stop-color="#0b1a2a"/>
+          </linearGradient>
+        </defs>
+        <rect width="280" height="110" rx="10" fill="url(#tr-fit-bg)" stroke="rgba(245,158,11,0.38)"/>
+        <!-- Sprint Track Lanes -->
+        <rect x="18" y="66" width="244" height="28" rx="6" fill="#7c2d12" stroke="#f59e0b" stroke-opacity="0.45"/>
+        <line x1="22" y1="75" x2="258" y2="75" stroke="rgba(255,255,255,0.28)" stroke-dasharray="8 6"/>
+        <line x1="22" y1="85" x2="258" y2="85" stroke="rgba(255,255,255,0.28)" stroke-dasharray="8 6"/>
+        <!-- Barbell Rack -->
+        <rect x="34" y="34" width="72" height="5" rx="2" fill="#cbd5e1"/>
+        <rect x="42" y="21" width="8" height="31" rx="2" fill="#f59e0b"/>
+        <rect x="52" y="25" width="6" height="23" rx="2" fill="#38bdf8"/>
+        <rect x="90" y="21" width="8" height="31" rx="2" fill="#f59e0b"/>
+        <rect x="82" y="25" width="6" height="23" rx="2" fill="#38bdf8"/>
+        <!-- Heartbeat / VO2 Monitor -->
+        <rect x="130" y="18" width="132" height="40" rx="8" fill="#0f172a" stroke="rgba(16,185,129,0.4)"/>
+        <polyline points="140,42 158,42 166,26 174,52 184,34 192,42 214,42 222,28 230,48 238,42 254,42" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linejoin="round"/>
+        <text x="196" y="30" fill="#fde68a" font-size="8" font-family="JetBrains Mono" text-anchor="middle">VO2 MAX • STAMINA</text>
+      </svg>`;
+  }
+  return `
+    <svg viewBox="0 0 280 110" class="train-art-svg">
+      <defs>
+        <linearGradient id="tr-fld-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#072226"/><stop offset="100%" stop-color="#0b152a"/>
+        </linearGradient>
+      </defs>
+      <rect width="280" height="110" rx="10" fill="url(#tr-fld-bg)" stroke="rgba(56,189,248,0.38)"/>
+      <!-- Turf Ring -->
+      <ellipse cx="140" cy="78" rx="115" ry="22" fill="#14532d" stroke="rgba(52,211,153,0.45)"/>
+      <!-- Catching Cradle Ramp -->
+      <path d="M36 74 Q58 46 84 44 L88 74 Z" fill="rgba(56,189,248,0.22)" stroke="#38bdf8" stroke-width="2"/>
+      <!-- Reaction Wall Panels -->
+      <rect x="172" y="18" width="84" height="44" rx="7" fill="#0f172a" stroke="#38bdf8"/>
+      <circle cx="192" cy="34" r="6" fill="#10b981"/><circle cx="214" cy="34" r="6" fill="#f59e0b"/><circle cx="236" cy="34" r="6" fill="#f43f5e"/>
+      <circle cx="203" cy="50" r="6" fill="#38bdf8"/><circle cx="225" cy="50" r="6" fill="#34d399"/>
+      <!-- Agility Cones + Ball Trajectory -->
+      <polygon points="108,82 114,68 120,82" fill="#f59e0b"/>
+      <polygon points="134,86 140,72 146,86" fill="#f59e0b"/>
+      <polygon points="160,82 166,68 172,82" fill="#f59e0b"/>
+      <path d="M78 44 Q124 14 156 54" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-dasharray="4 3"/>
+      <circle cx="156" cy="54" r="5" fill="#f8fafc" stroke="#ef4444" stroke-width="1.3"/>
+    </svg>`;
+}

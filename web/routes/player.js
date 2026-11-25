@@ -35,6 +35,8 @@ import {
   updatePlayerSetting,
   resetPlayerSettings
 } from '../../src/game/settings.js';
+import { getTrainingStatus, executeTrainingDrill } from '../../src/game/trainingProgress.js';
+import { getPlayerModeStatsBreakdown } from '../../src/game/statsHelper.js';
 import { recordSystemLog } from '../../src/game/systemLog.js';
 
 const SUPPORTED_NATIONS = [
@@ -80,16 +82,9 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const equipmentBonuses = getEquipmentBonuses(db, playerId);
     const unlockedSkills = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
     const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-    const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(playerId)?.c || 0;
-    const dismissals = Math.max(1, (stats.matches || 0) - notOuts);
-    const bestBowl = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(playerId);
-    const computedStats = {
-      battingAvg: stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00',
-      strikeRate: stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00',
-      economy: stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00',
-      bowlingAvg: stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00',
-      bestBowling: bestBowl ? `${bestBowl.wickets}/${bestBowl.runs_conceded}` : 'N/A'
-    };
+    const breakdown = getPlayerModeStatsBreakdown(db, playerId);
+    const computedStats = breakdown.overall;
+    const modeStats = breakdown.modes;
     const settings = getPlayerSettings(playerId);
     const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
     const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(playerId);
@@ -114,6 +109,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       unlockedSkills,
       stats,
       computedStats,
+      modeStats,
       settings,
       academy,
       activeContract,
@@ -306,6 +302,13 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     return sendJson(res, 200, { currentChapter: player.current_chapter, chapters: list });
   }
 
+  // Training Status (bars, daily session caps, level attribute cap)
+  if (pathname === '/api/train/status' && req.method === 'GET') {
+    const player = getPlayerOrFail(res, user);
+    if (!player) return true;
+    return sendJson(res, 200, getTrainingStatus(db, player));
+  }
+
   // Training
   if (pathname === '/api/train' && req.method === 'POST') {
     const player = getPlayerOrFail(res, user);
@@ -320,72 +323,24 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     if (energy < 25) return sendJson(res, 400, { error: `Exhausted! Energy is ${energy}/100 (requires 25).` });
     if (player.training_tokens <= 0) return sendJson(res, 400, { error: 'No Training Tickets left!' });
 
+    loadAcademies();
+    const bonuses = (academies[player.academy_id]?.bonuses) || {};
+    const xpMult = bonuses[regime] || 1.0;
+
+    let drillRes;
+    try {
+      drillRes = executeTrainingDrill(db, player, regime, xpMult);
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+
     db.prepare('UPDATE players SET training_tokens = training_tokens - 1 WHERE discord_id = ?').run(playerId);
     consumeEnergy(db, playerId, 25);
 
-    const currentAttrs = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(playerId) || {};
-    loadAcademies();
-    const bonuses = (academies[player.academy_id]?.bonuses) || {};
-    let xpMult = 1.0;
-    const gains = [];
-    const updates = [];
-
-    function rollBreakthrough(val, isPrimary, mult = 1.0) {
-      const v = val || 10;
-      if (v >= 99) return 0;
-      let chance = 0.50;
-      if (v < 45) chance = 0.70;
-      else if (v < 60) chance = 0.50;
-      else if (v < 75) chance = 0.32;
-      else if (v < 85) chance = 0.18;
-      else if (v < 95) chance = 0.08;
-      else chance = 0.03;
-      if (!isPrimary) chance *= 0.55;
-      chance *= mult;
-      return Math.random() < chance ? 1 : 0;
-    }
-
-    function applyAttr(key, isPrimary, mult) {
-      const curr = currentAttrs[key] || 10;
-      const g = rollBreakthrough(curr, isPrimary, mult);
-      if (g > 0) {
-        const nextVal = Math.min(99, curr + g);
-        gains.push({ key, from: curr, to: nextVal, delta: g });
-        updates.push(`${key} = MIN(99, ${key} + ${g})`);
-      }
-    }
-
-    if (regime === 'batting') {
-      xpMult = bonuses.batting || 1.0;
-      const pPool = ['timing', 'technique'];
-      const sPool = ['power', 'defense'];
-      applyAttr(pPool[Math.floor(Math.random() * pPool.length)], true, xpMult);
-      applyAttr(sPool[Math.floor(Math.random() * sPool.length)], false, xpMult);
-    } else if (regime === 'bowling') {
-      xpMult = bonuses.bowling || 1.0;
-      const pPool = ['accuracy', 'variations'];
-      const sec = (player.bowling_style || '').toLowerCase().includes('spin') ? 'spin_bowling' : (Math.random() < 0.5 ? 'swing' : 'seam');
-      applyAttr(pPool[Math.floor(Math.random() * pPool.length)], true, xpMult);
-      applyAttr(sec, false, xpMult);
-    } else if (regime === 'fitness') {
-      xpMult = bonuses.fitness || 1.0;
-      const pPool = ['fitness', 'stamina'];
-      const sPool = ['power', 'running'];
-      applyAttr(pPool[Math.floor(Math.random() * pPool.length)], true, xpMult);
-      applyAttr(sPool[Math.floor(Math.random() * sPool.length)], false, xpMult);
-    } else {
-      xpMult = bonuses.fielding || 1.0;
-      const pPool = ['fielding', 'reflex'];
-      const sPool = ['throw_accuracy', 'running'];
-      applyAttr(pPool[Math.floor(Math.random() * pPool.length)], true, xpMult);
-      applyAttr(sPool[Math.floor(Math.random() * sPool.length)], false, xpMult);
-    }
-
-    if (updates.length > 0) {
-      db.prepare(`UPDATE attributes SET ${updates.join(', ')} WHERE player_id = ?`).run(playerId);
-    }
     const xpEarned = Math.round(50 * xpMult);
     const xpRes = addXP(db, playerId, xpEarned);
+    const updatedPlayer = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId) || player;
+    const trainingStatus = getTrainingStatus(db, updatedPlayer);
 
     recordSystemLog({
       level: 'INFO',
@@ -393,11 +348,11 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       actor: user.username,
       target: player.name,
       title: `Completed ${regime} training`,
-      details: { xpEarned, gains },
+      details: { xpEarned, gains: drillRes.gains, progress: drillRes.newProgress, dailyUsed: drillRes.dailyUsed },
       ip
     });
 
-    return sendJson(res, 200, { ok: true, regime, xpEarned, gains, ...xpRes });
+    return sendJson(res, 200, { ok: true, xpEarned, ...drillRes, ...xpRes, trainingStatus });
   }
 
   // Skills
@@ -638,21 +593,14 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const player = getPlayerOrFail(res, user);
     if (!player) return true;
     const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-    const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(playerId)?.c || 0;
-    const dismissals = Math.max(1, (stats.matches || 0) - notOuts);
-    const bestBowl = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(playerId);
+    const breakdown = getPlayerModeStatsBreakdown(db, playerId);
     const history = db.prepare('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 40').all(playerId);
     const achievementsList = getPlayerAchievements(db, playerId);
 
     return sendJson(res, 200, {
       stats,
-      computed: {
-        battingAvg: stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00',
-        strikeRate: stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00',
-        economy: stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00',
-        bowlingAvg: stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00',
-        bestBowling: bestBowl ? `${bestBowl.wickets}/${bestBowl.runs_conceded}` : 'N/A'
-      },
+      computed: breakdown.overall,
+      modes: breakdown.modes,
       history,
       achievements: achievementsList
     });
@@ -730,16 +678,9 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const effectiveAttributes = getEffectiveAttributes(db, tid);
     const equipmentBonuses = getEquipmentBonuses(db, tid);
     const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(tid) || {};
-    const notOuts = db.prepare("SELECT COUNT(*) as c FROM match_history WHERE player_id = ? AND LOWER(dismissal) = 'not out'").get(tid)?.c || 0;
-    const dismissals = Math.max(1, (stats.matches || 0) - notOuts);
-    const bestBowl = db.prepare('SELECT wickets, runs_conceded FROM match_history WHERE player_id = ? ORDER BY wickets DESC, runs_conceded ASC LIMIT 1').get(tid);
-    const computedStats = {
-      battingAvg: stats.matches > 0 ? (stats.runs / dismissals).toFixed(2) : '0.00',
-      strikeRate: stats.balls > 0 ? ((stats.runs / stats.balls) * 100).toFixed(2) : '0.00',
-      economy: stats.overs > 0 ? (stats.runs_conceded / stats.overs).toFixed(2) : '0.00',
-      bowlingAvg: stats.wickets > 0 ? (stats.runs_conceded / stats.wickets).toFixed(2) : '0.00',
-      bestBowling: bestBowl ? `${bestBowl.wickets}/${bestBowl.runs_conceded}` : 'N/A'
-    };
+    const breakdown = getPlayerModeStatsBreakdown(db, tid);
+    const computedStats = breakdown.overall;
+    const modeStats = breakdown.modes;
     const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(tid);
     const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(tid);
     const inventory = db.prepare('SELECT * FROM inventory WHERE player_id = ? AND equipped = 1').all(tid).map(i => ({
@@ -760,6 +701,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       equipmentBonuses,
       stats,
       computedStats,
+      modeStats,
       academy,
       activeContract,
       tournamentsWon,
