@@ -1,12 +1,11 @@
 {
-  "name": "Admin",
+  "name": "cricket-ascend-web",
   "version": "1.0.0",
-  "description": "",
-  "main": "startup.js",
+  "description": "Cricket Ascend Web Career RPG",
+  "main": "web/server.js",
   "scripts": {
-    "start": "node startup.js",
+    "start": "node web/server.js",
     "web": "node web/server.js",
-    "deploy": "node src/deploy-commands.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,9 +13,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@napi-rs/canvas": "^1.0.1",
     "better-sqlite3": "^11.8.1",
-    "discord.js": "^14.26.4",
     "dotenv": "^17.4.2"
   }
 }

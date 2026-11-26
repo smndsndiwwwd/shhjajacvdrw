@@ -112,8 +112,8 @@ export function ensureDefaultAdmin() {
       actor: 'system',
       target: adminUser,
       title: 'Default Admin Account Provisioned',
-      details: `Provisioned initial admin account "${adminUser}". Change password or create additional admins inside the Admin Console.`
+      details: `Provisioned initial admin account "${adminUser}". Update credentials cleanly inside environment settings.`
     });
-    console.log(`🛡️ Seeded default Admin account: username="${adminUser}" password="${adminPass}"`);
+    console.log(`🛡️ Seeded initial Admin account "${adminUser}".`);
   }
 }

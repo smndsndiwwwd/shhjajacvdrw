@@ -68,7 +68,7 @@ export async function renderAdminView(container, state, refresh) {
             <div>
               <span class="badge badge-crimson">🛡️ ADMINISTRATOR COMMAND CENTER</span>
               <h1 style="margin:8px 0 2px;font-size:1.75rem;">System Audit Logs &amp; Governance</h1>
-              <div style="font-size:0.84rem;color:var(--text-muted);">Signed in as Admin <strong>${esc(state.user.username)}</strong> • Monitors both Web Portal &amp; Discord Bot activity.</div>
+              <div style="font-size:0.84rem;color:var(--text-muted);">Signed in as Admin <strong>${esc(state.user.username)}</strong> • Tracks Web Portal players, economy grants &amp; administrator actions.</div>
             </div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
               <div class="hud-chip">Users: <strong>${m.webUsers}</strong> (${m.admins} Admin)</div>
@@ -107,7 +107,7 @@ export async function renderAdminView(container, state, refresh) {
                 <div class="card card-glow-gold" style="padding:14px;">
                   <div class="label">🪙 Economy &amp; Admin Ops Today</div>
                   <div class="stat-big" style="font-size:1.75rem;color:var(--gold);">${ins.economyToday ?? 0}</div>
-                  <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Shop, Auctions, Contracts &amp; Grants</div>
+                  <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Admin Ops: <strong style="color:#fff;">${ins.adminActionsToday ?? 0}</strong> • Shop, Auctions &amp; Grants</div>
                 </div>
                 <div class="card ${((ins.failedLoginsToday || 0) + (ins.alertsLast24h || 0)) > 0 ? 'card-glow-crimson' : ''}" style="padding:14px;">
                   <div class="label">🚨 Security &amp; Alerts (24h)</div>
@@ -161,6 +161,39 @@ export async function renderAdminView(container, state, refresh) {
                   </div>
                 </div>
               </div>
+
+              <!-- Dedicated Admin Audit Actions Feed -->
+              <div class="card card-glow-gold" style="padding:14px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                  <h4 style="font-size:0.95rem;margin:0;">🛡️ Admin Actions &amp; Grants Audit</h4>
+                  <span class="badge badge-gold">${(ins.recentAdminActions || []).length} Recent Ops</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
+                  ${(ins.recentAdminActions || []).map(ad => {
+                    let infoText = '';
+                    if (ad.details) {
+                      try {
+                        const d = JSON.parse(ad.details);
+                        if (d && typeof d === 'object') {
+                          infoText = d.type ? `${d.amount > 0 && d.type !== 'energy' ? '+' : ''}${d.amount} ${d.type}` : JSON.stringify(d);
+                        }
+                      } catch { infoText = String(ad.details); }
+                    }
+                    return `
+                      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:8px;background:rgba(6,10,22,0.75);font-size:0.79rem;">
+                        <span>
+                          <span class="badge badge-gold" style="font-size:0.64rem;">ADMIN</span>
+                          <strong style="color:var(--cyan);margin-left:4px;">${esc(ad.actor)}</strong>
+                          ➔ <strong>${esc(ad.title)}</strong>
+                          ${ad.target ? ` <span style="color:var(--text-muted);">(${esc(ad.target)})</span>` : ''}
+                          ${infoText ? ` <span class="badge badge-muted mono" style="font-size:0.66rem;">${esc(infoText.slice(0, 48))}</span>` : ''}
+                        </span>
+                        <span class="mono" style="color:var(--text-muted);font-size:0.72rem;">${esc(ad.timestamp)} ${ad.ip ? `• ${esc(ad.ip)}` : ''}</span>
+                      </div>
+                    `;
+                  }).join('') || '<div style="font-size:0.8rem;color:var(--text-muted);">No admin grants or modifications logged yet.</div>'}
+                </div>
+              </div>
             `;
           })()}
 
@@ -202,20 +235,29 @@ export async function renderAdminView(container, state, refresh) {
                   <tr><th>ID</th><th>Timestamp (UTC)</th><th>Level</th><th>Category</th><th>Actor</th><th>Target</th><th>Event Title</th><th>Details</th></tr>
                 </thead>
                 <tbody>
-                  ${logsData.logs.map((row, idx) => `
-                    <tr>
-                      <td class="mono" style="color:var(--text-muted);">#${row.id}</td>
-                      <td class="mono" style="font-size:0.75rem;white-space:nowrap;">${esc(row.timestamp)}</td>
-                      <td><span class="badge ${levelBadgeClass(row.level)}">${esc(row.level)}</span></td>
-                      <td><span class="badge badge-muted">${esc(row.category)}</span></td>
-                      <td class="mono" style="color:var(--cyan);">${esc(row.actor)}</td>
-                      <td class="mono">${esc(row.target || '—')}</td>
-                      <td><strong>${esc(row.title)}</strong></td>
-                      <td>
-                        ${row.details || row.ip ? `<button class="btn btn-sm inspect-log-btn" data-idx="${idx}">Inspect</button>` : '—'}
-                      </td>
-                    </tr>
-                  `).join('') || '<tr><td colspan="8" style="color:var(--text-muted);">No matching log entries.</td></tr>'}
+                  ${logsData.logs.map((row, idx) => {
+                    let preview = '';
+                    if (row.details) {
+                      try {
+                        const d = JSON.parse(row.details);
+                        preview = d?.type ? `${d.amount} ${d.type}` : (typeof d === 'string' ? d : JSON.stringify(d));
+                      } catch { preview = String(row.details); }
+                    }
+                    return `
+                      <tr>
+                        <td class="mono" style="color:var(--text-muted);">#${row.id}</td>
+                        <td class="mono" style="font-size:0.75rem;white-space:nowrap;">${esc(row.timestamp)}</td>
+                        <td><span class="badge ${levelBadgeClass(row.level)}">${esc(row.level)}</span></td>
+                        <td><span class="badge badge-muted">${esc(row.category)}</span></td>
+                        <td class="mono" style="color:var(--cyan);">${esc(row.actor)}</td>
+                        <td class="mono">${esc(row.target || '—')}</td>
+                        <td><strong>${esc(row.title)}</strong>${preview ? `<div class="mono" style="font-size:0.7rem;color:var(--text-muted);">${esc(preview.slice(0, 64))}</div>` : ''}</td>
+                        <td>
+                          ${row.details || row.ip ? `<button class="btn btn-sm inspect-log-btn" data-idx="${idx}">Inspect</button>` : '—'}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('') || '<tr><td colspan="8" style="color:var(--text-muted);">No matching log entries.</td></tr>'}
                 </tbody>
               </table>
             </div>

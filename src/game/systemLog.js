@@ -2,7 +2,6 @@ import db from '../database/db.js';
 
 /**
  * Records a structured audit/system log entry in SQLite `admin_logs`.
- * Used by both the web server and the Discord bot.
  */
 export function recordSystemLog({
   level = 'INFO',
@@ -14,9 +13,22 @@ export function recordSystemLog({
   ip = null
 }) {
   try {
-    const serialized = details == null
-      ? null
-      : (typeof details === 'string' ? details : JSON.stringify(details));
+    let serialized = null;
+    if (details != null) {
+      if (typeof details === 'string') {
+        serialized = details;
+      } else if (typeof details === 'object') {
+        const clone = { ...details };
+        for (const k of Object.keys(clone)) {
+          if (k.toLowerCase().includes('password') || k.toLowerCase().includes('secret')) {
+            clone[k] = '[REDACTED]';
+          }
+        }
+        serialized = JSON.stringify(clone);
+      } else {
+        serialized = JSON.stringify(details);
+      }
+    }
 
     db.prepare(`
       INSERT INTO admin_logs (timestamp, level, category, actor, target, title, details, ip)
@@ -139,6 +151,20 @@ export function getAdminLogInsights() {
     LIMIT 8
   `).all();
 
+  const adminActionsToday = db.prepare(`
+    SELECT COUNT(*) as cnt FROM admin_logs
+    WHERE (level = 'ADMIN' OR category = 'Admin')
+      AND date(timestamp) = date('now')
+  `).get()?.cnt || 0;
+
+  const recentAdminActions = db.prepare(`
+    SELECT id, actor, target, title, details, ip, timestamp
+    FROM admin_logs
+    WHERE level = 'ADMIN' OR category = 'Admin'
+    ORDER BY id DESC
+    LIMIT 15
+  `).all();
+
   return {
     loginsToday,
     uniqueLoginsToday,
@@ -147,12 +173,14 @@ export function getAdminLogInsights() {
     careersCreatedToday,
     matchesToday,
     economyToday,
+    adminActionsToday,
     alertsLast24h,
     loginsLast7d,
     topActorsToday,
     categoryBreakdownToday,
     hourlyActivity,
-    recentLogins
+    recentLogins,
+    recentAdminActions
   };
 }
 

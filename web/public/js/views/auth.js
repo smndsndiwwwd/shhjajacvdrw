@@ -82,7 +82,7 @@ export function renderAuthView(container, onAuthenticated) {
             </form>
 
             <div style="margin-top:20px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,0.75);border:1px solid var(--border-subtle);font-size:0.78rem;color:var(--text-muted);line-height:1.5;">
-              <strong style="color:var(--gold);">Admin Console Access:</strong> Log in with an administrator account (default seeded: <code class="mono" style="color:#fff;">admin</code> / <code class="mono" style="color:#fff;">Admin@Cricket2026</code>) to unlock full Live System Logs, Player Grants &amp; Economy Management.
+              <strong style="color:var(--gold);">Administrator Access:</strong> Sign in with an authorized administrator account to open System Audit Logs, Player Grants &amp; Economy Controls.
             </div>
           </div>
         </div>

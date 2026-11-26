@@ -197,13 +197,16 @@ export async function handleAdminRoutes(req, res, pathname, query) {
       return sendJson(res, 400, { error: 'Invalid resource type.' });
     }
 
+    const targetLabel = targetPlayer.public_id
+      ? `${targetPlayer.name} [${targetPlayer.public_id}]`
+      : targetPlayer.name;
     recordSystemLog({
       level: 'ADMIN',
       category: 'Admin',
       actor: user.username,
-      target: targetPlayer.name,
-      title: `Admin Grant Issued: ${summary}`,
-      details: { targetPlayerId, type, amount },
+      target: targetLabel,
+      title: `Admin Gave ${summary} ➔ ${targetPlayer.name}`,
+      details: { targetPlayerId, publicId: targetPlayer.public_id || null, type, amount },
       ip
     });
     return sendJson(res, 200, { ok: true, summary });
