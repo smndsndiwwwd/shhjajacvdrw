@@ -161,11 +161,57 @@ export async function computeTimingProfile(match, playerOpt = null) {
   };
 }
 
+export function buildTimingFeedback(timing, needlePos, timingProfile) {
+  if (timing === 'Left Alone') {
+    return { grade: 'Ideal', label: 'Left Alone', needlePos: 50, sweetHalf: timingProfile?.sweetHalf || 16.5, goodHalf: timingProfile?.goodHalf || 37 };
+  }
+  const sweetHalf = Number(timingProfile?.sweetHalf || 16.5);
+  const goodHalf = Number(timingProfile?.goodHalf || 37);
+  const okSplit = sweetHalf + (goodHalf - sweetHalf) * 0.55;
+
+  let np = (typeof needlePos === 'number' && !Number.isNaN(needlePos)) ? needlePos : null;
+  if (np === null) {
+    if (timing === 'Perfect') np = 50;
+    else if (timing === 'Slightly Early') np = Math.max(4, Math.round(50 - (sweetHalf + 6)));
+    else if (timing === 'Slightly Late') np = Math.min(96, Math.round(50 + (sweetHalf + 6)));
+    else if (timing === 'Very Early') np = Math.max(2, Math.round(50 - (goodHalf + 8)));
+    else np = Math.min(98, Math.round(50 + (goodHalf + 8)));
+  }
+
+  const dist = Math.abs(np - 50);
+  const side = np < 50 ? 'Early' : 'Late';
+  let grade = 'Ideal';
+  let label = 'Ideal';
+  if (dist <= sweetHalf) {
+    grade = 'Ideal';
+    label = 'Ideal';
+  } else if (dist <= okSplit) {
+    grade = 'Good';
+    label = `Good (${side})`;
+  } else if (dist <= goodHalf) {
+    grade = 'OK';
+    label = `OK (${side})`;
+  } else {
+    grade = 'Poor';
+    label = `Very ${side}`;
+  }
+
+  return {
+    grade,
+    label,
+    needlePos: Math.round(np * 10) / 10,
+    sweetHalf,
+    goodHalf
+  };
+}
+
 export function resolveBattingTiming(timingChoice, needlePos, timingProfile, confidence, activeSkills, isClutch) {
+  const sweetHalf = Number(timingProfile?.sweetHalf || 16.5);
+  const goodHalf = Number(timingProfile?.goodHalf || 37);
   if (typeof needlePos === 'number' && !Number.isNaN(needlePos)) {
     const dist = Math.abs(needlePos - 50);
-    if (dist <= timingProfile.sweetHalf) return 'Perfect';
-    if (dist <= timingProfile.goodHalf) return needlePos < 50 ? 'Slightly Early' : 'Slightly Late';
+    if (dist <= sweetHalf) return 'Perfect';
+    if (dist <= goodHalf) return needlePos < 50 ? 'Slightly Early' : 'Slightly Late';
     return needlePos < 50 ? 'Very Early' : 'Very Late';
   }
 
@@ -719,7 +765,7 @@ export async function playWebMatchBall(playerId, action = {}) {
     const ppOvers = match.totalOvers >= 15 ? 6 : match.totalOvers >= 5 ? 2 : 1;
     const completedOvers = match.attack ? match.attack.completedOvers : Math.floor(match.bat.balls / 6);
     const isPowerplay = completedOvers < ppOvers;
-    const timingProfile = computeTimingProfile(match, player);
+    const timingProfile = await computeTimingProfile(match, player);
     const parsedNeedle = (needlePos !== null && needlePos !== undefined && needlePos !== '') ? Number(needlePos) : null;
     const timingResult = isLeave
       ? 'Perfect'
@@ -800,7 +846,8 @@ export async function playWebMatchBall(playerId, action = {}) {
     const effectiveDeliv = simResult.actualLine && simResult.actualLine !== deliv.line
       ? { ...deliv, line: simResult.actualLine }
       : deliv;
-    const entry = `${effectiveDeliv.length} on ${effectiveDeliv.line} (${effectiveDeliv.speed} ${effectiveDeliv.variation}) ➔ ${shotName} [${simResult.timing}] — ${simResult.commentary}${overMsg}`;
+    const timingFeedback = buildTimingFeedback(simResult.timing, isLeave ? 50 : parsedNeedle, timingProfile);
+    const entry = `${effectiveDeliv.length} on ${effectiveDeliv.line} (${effectiveDeliv.speed} ${effectiveDeliv.variation}) ➔ ${shotName} [${timingFeedback.label}] — ${simResult.commentary}${overMsg}`;
     match.commentaryLog.unshift(entry);
     match.ballHistory = match.ballHistory || [];
     match.ballHistory.push(
@@ -818,6 +865,8 @@ export async function playWebMatchBall(playerId, action = {}) {
       rebowl: simResult.rebowl,
       freeHitNext: match.bat.freeHit,
       timing: simResult.timing,
+      timingFeedback,
+      shotSelection: simResult.shotSelection || null,
       shotName,
       footwork,
       intent: isLeave ? 'Leave' : intent,
@@ -944,6 +993,7 @@ export async function playWebMatchBall(playerId, action = {}) {
       simResult.rebowl ? 'WD' :
       String(simResult.runs)
     );
+    const timingFeedback = buildTimingFeedback(timingResult, null, { sweetHalf: 16.5, goodHalf: 37 });
     match.lastBall = {
       runs: simResult.runs,
       wicket: simResult.wicket,
@@ -952,6 +1002,8 @@ export async function playWebMatchBall(playerId, action = {}) {
       extraType: simResult.extraType || '',
       rebowl: simResult.rebowl,
       timing: timingResult,
+      timingFeedback,
+      shotSelection: simResult.shotSelection || null,
       shotName: aiShot,
       footwork: 'Front Foot',
       intent: aiIntent === 'Defensive' ? 'Push' : aiIntent === 'Aggressive' ? 'Loft' : 'Stroke',

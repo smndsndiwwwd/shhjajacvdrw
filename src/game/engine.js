@@ -925,6 +925,21 @@ export function getDerivedShotName(footwork, intent, zone) {
   return `${intent || 'Stroke'} towards ${zone || 'Long On'}`;
 }
 
+function buildShotSelectionFeedback(matchupStar, reason = '') {
+  const clamped = Math.max(1, Math.min(5, Number(matchupStar) || 3));
+  const score = Math.round(((clamped - 1) / 4) * 100);
+  let grade = 'OK';
+  if (clamped >= 3.75) grade = 'Ideal';
+  else if (clamped >= 3.0) grade = 'Good';
+  else if (clamped < 2.2) grade = 'Poor';
+  return {
+    grade,
+    stars: Math.round(clamped * 10) / 10,
+    score,
+    reason: reason || (grade === 'Ideal' ? 'Matched footwork & line' : grade === 'Good' ? 'Solid shot choice' : 'Moderate matchup')
+  };
+}
+
 export function simulateBallAdvanced({
   bowlerInput,
   batterInput,
@@ -1060,7 +1075,9 @@ export function simulateBallAdvanced({
       actualZone: 'In Line',
       commentary,
       timing: 'Left Alone',
-      matchupStar: 3,
+      inputTiming: 'Left Alone',
+      matchupStar: wicket ? 1 : 4,
+      shotSelection: buildShotSelectionFeedback(wicket ? 1 : 4, wicket ? 'Left straight ball on stumps' : 'Disciplined leave'),
       outcomeType,
       nextIsFreeHit,
       rebowl
@@ -1068,10 +1085,12 @@ export function simulateBallAdvanced({
   }
 
   // Stance & Footwork Evaluation
-  let adjustedTiming = timingResult;
+  const playerInputTiming = timingResult || 'Perfect';
+  let adjustedTiming = playerInputTiming;
   let stanceMatch = true;
   let stancePenaltyText = '';
   let matchupStar = 3;
+  const selectionReasons = [];
 
   // Physical & Technical Compatibility Checks
   const isPull = effectiveShot.toLowerCase().includes('pull') || effectiveShot.toLowerCase().includes('hook') || (effectiveFootwork === 'Back Foot' && ['Mid Wicket', 'Square Leg', 'Fine Leg'].includes(effectiveZone) && effectiveIntent !== 'Push');
@@ -1083,6 +1102,13 @@ export function simulateBallAdvanced({
   const isPullOnFullOrYorker = isPull && (actualLength === 'Full' || actualLength === 'Yorker');
   const isCrossLineDrag = (line === 'Off Side' || line === 'Wide') && ['Mid Wicket', 'Square Leg', 'Fine Leg', 'Long On'].includes(effectiveZone);
   const isWrongSideCut = line === 'Leg Side' && ['Third Man', 'Point', 'Cover'].includes(effectiveZone);
+
+  if (isPullOnFullOrYorker) selectionReasons.push('Pull vs Full/Yorker');
+  else if (isBackFootToFull) selectionReasons.push('Back Foot vs Full ball');
+  if (isFrontFootToShort) selectionReasons.push('Front Foot vs Bouncer');
+  if (isCreaseLoftToYorker) selectionReasons.push('Loft vs Yorker');
+  if (isCrossLineDrag) selectionReasons.push('Cross-line vs Off Side');
+  if (isWrongSideCut) selectionReasons.push('Off-side cut vs Leg Side');
 
   // Calculate Mismatch Severity
   let mismatchSeverity = 0;
@@ -1100,10 +1126,10 @@ export function simulateBallAdvanced({
   // Stance check
   if (effectiveStance === 'Off Side') {
     if (line === 'Off Side' || line === 'Wide') matchupStar += 0.75;
-    else if (line === 'Leg Side') { stanceMatch = false; stancePenaltyText += 'Covered off-stump but exposed to leg-side! '; }
+    else if (line === 'Leg Side') { stanceMatch = false; stancePenaltyText += 'Covered off-stump but exposed to leg-side! '; selectionReasons.push('Stance exposed Leg Side'); }
   } else if (effectiveStance === 'Leg Side') {
     if (line === 'Leg Side') matchupStar += 0.75;
-    else if (line === 'Off Side' || line === 'Wide') { stanceMatch = false; stancePenaltyText += 'Guarded leg-side but delivery was outside off! '; }
+    else if (line === 'Off Side' || line === 'Wide') { stanceMatch = false; stancePenaltyText += 'Guarded leg-side but delivery was outside off! '; selectionReasons.push('Stance exposed Off Side'); }
   } else if (effectiveStance === 'In Line') {
     matchupStar += 0.5; // Balanced
   }
@@ -1112,6 +1138,7 @@ export function simulateBallAdvanced({
   if (effectiveFootwork === 'Front Foot') {
     if (actualLength === 'Good Length' || actualLength === 'Full' || actualLength === 'Yorker' || actualLength === 'Full Toss') {
       matchupStar += 1.0;
+      if (selectionReasons.length === 0) selectionReasons.push('Good Front-Foot Stride');
     } else if (actualLength === 'Short') {
       stanceMatch = false;
       stancePenaltyText += 'Committed to front foot against a short bouncer! ';
@@ -1119,6 +1146,7 @@ export function simulateBallAdvanced({
   } else if (effectiveFootwork === 'Back Foot') {
     if (actualLength === 'Short') {
       matchupStar += 1.5;
+      if (selectionReasons.length === 0) selectionReasons.push('Crisp Back-Foot Pivot');
     } else if (actualLength === 'Yorker' || actualLength === 'Full') {
       stanceMatch = false;
       stancePenaltyText += 'Stuck on the back foot against a fuller delivery! ';
@@ -1128,13 +1156,16 @@ export function simulateBallAdvanced({
       actualLength = Math.random() < 0.6 ? 'Full Toss' : 'Full';
       matchupStar += 1.25;
       bowlerMissText += '⚡ Stepped out of the crease to intercept the Yorker on the full! ';
+      if (selectionReasons.length === 0) selectionReasons.push('Charged the Yorker');
     } else if (actualLength === 'Good Length' || actualLength === 'Full') {
       matchupStar += 1.5;
+      if (selectionReasons.length === 0) selectionReasons.push('Charged down cleanly');
     } else if (actualLength === 'Short') {
       matchupStar += 0.75;
       bowlerMissText += '⚡ Stepped out boldly to take the bouncer on the rise! ';
     } else if (actualLength === 'Full Toss') {
       matchupStar += 1.5;
+      if (selectionReasons.length === 0) selectionReasons.push('Met Full Toss on advance');
     }
   }
 
@@ -1143,20 +1174,21 @@ export function simulateBallAdvanced({
   }
 
   // Handle Severe Technical Mismatches (e.g. Back Foot Pull to Slow Full ball outside off)
+  // NOTE: Do NOT lie about playerInputTiming! Keep miss-severity tied to actual bad click timing vs shot selection mismatch.
   if (isSevereMismatch) {
     let mismatchZone = effectiveZone;
     matchupStar = 1.0;
+    const isGenuineVeryBadClick = playerInputTiming.includes('Very');
     if (adjustedTiming === 'Perfect') {
-      adjustedTiming = isDeceivedByPace ? 'Very Early' : (Math.random() < 0.6 ? 'Very Early' : 'Slightly Early');
-    } else if (adjustedTiming.includes('Slightly') && isDeceivedByPace) {
-      adjustedTiming = 'Very Early';
+      adjustedTiming = isDeceivedByPace ? 'Slightly Early' : (Math.random() < 0.55 ? 'Slightly Early' : 'Slightly Late');
     }
+    const severeFailRoll = isGenuineVeryBadClick || (isDeceivedByPace && playerInputTiming.includes('Slightly'));
 
-    if (adjustedTiming.includes('Very')) {
+    if (severeFailRoll) {
       if (isFreeHit) {
         runs = 0;
         dismissalDetail = 'keeper';
-        commentary = `💨 Horrible technical mismatch! Swung wildly and missed, saved by the FREE HIT! Dot ball.`;
+        commentary = `💨 Awkward shot selection for this delivery! Swung and missed, saved by the FREE HIT! Dot ball.`;
         outcomeType = 'Dot';
       } else {
         const outRoll = Math.random() * 100;
@@ -1168,11 +1200,11 @@ export function simulateBallAdvanced({
               dismissalType = 'caught';
               dismissalDetail = 'ring';
               mismatchZone = 'Cover';
-              commentary = `💔 CAUGHT! Atrocious shot selection! Reached out on the back foot to pull a ${speed.toLowerCase()} delivery full outside off. Skied a helpless top edge caught easily in the covers!`;
+              commentary = `💔 CAUGHT! Poor shot selection! Reached out on the back foot to pull a ${speed.toLowerCase()} delivery full outside off. Skied a helpless top edge caught easily in the covers!`;
             } else {
               dismissalType = 'bowled';
               dismissalDetail = 'bowled';
-              commentary = `💔 BOWLED! Attempted to pull a full delivery from outside off from deep in the crease! Thick bottom edge chops right onto off-stump!`;
+              commentary = `💔 BOWLED! Attempted to pull a full delivery outside off from deep in the crease! Thick bottom edge chops right onto off-stump!`;
             }
           } else if (isFrontFootToShort) {
             dismissalType = 'caught';
@@ -1186,11 +1218,11 @@ export function simulateBallAdvanced({
           } else if (actualLength === 'Yorker' || actualLength === 'Full') {
             dismissalType = 'bowled';
             dismissalDetail = 'bowled';
-            commentary = `💔 BOWLED! Stuck on the back foot against a full delivery, missed the line completely! Clean bowled!`;
+            commentary = `💔 BOWLED! Stuck on the back foot against a full delivery, jammed out cleanly!`;
           } else {
             dismissalType = 'caught';
             dismissalDetail = 'ring';
-            commentary = `💔 CAUGHT! Egregious footwork mismatch results in a wretched skier, taken comfortably in the ring!`;
+            commentary = `💔 CAUGHT! Wrong footwork for line and length results in a skier taken comfortably in the ring!`;
           }
           outcomeType = 'Out';
         } else {
@@ -1198,11 +1230,13 @@ export function simulateBallAdvanced({
           dismissalDetail = 'keeper';
           outcomeType = 'Dot';
           if (isPullOnFullOrYorker) {
-            commentary = `💨 Beaten by flight & lack of pace! Stepped back to pull, but the delivery was too full and slow outside off. Swung through early and missed into the keeper's gloves! Dot ball.`;
+            commentary = isGenuineVeryBadClick
+              ? `💨 Swung very early and beaten by flight! Stepped back to pull a full, slow ball outside off — straight into the keeper's gloves.`
+              : `💨 Deceived by lack of pace & wrong footwork! Tried to pull a full delivery outside off cleanly to the keeper. Dot ball.`;
           } else if (isFrontFootToShort) {
             commentary = `💨 Beaten by steep bounce! Stood tall on the front foot to drive a bouncer, but the ball whistled past helmet into keeper's gloves. Dot ball.`;
           } else {
-            commentary = `💨 Completely deceived by the delivery! Swung wildly across the line and missed cleanly to the keeper. Dot ball.`;
+            commentary = `💨 Poor shot selection for this delivery! Swung across the line and missed cleanly to the keeper. Dot ball.`;
           }
         }
       }
@@ -1215,49 +1249,52 @@ export function simulateBallAdvanced({
         actualLine: line,
         actualZone: mismatchZone,
         commentary,
-        timing: adjustedTiming,
+        timing: playerInputTiming,
+        inputTiming: playerInputTiming,
+        executionTiming: adjustedTiming,
         matchupStar,
+        shotSelection: buildShotSelectionFeedback(matchupStar, selectionReasons[0] || 'Wrong footwork for delivery'),
         outcomeType,
         nextIsFreeHit,
         rebowl
       };
     } else {
-      // Slightly mistimed on severe mismatch: CAN NEVER BE 2+ RUNS OR BOUNDARY!
+      // Good/Perfect click timing on a severe footwork mismatch: Honest feedback blaming Shot Selection, never claiming "Very Early"!
       const catchRoll = Math.random() * 100;
-      if (!isFreeHit && catchRoll < 45) {
+      if (!isFreeHit && catchRoll < 42) {
         wicket = true;
         dismissalType = 'caught';
         dismissalDetail = 'ring';
         if (isPullOnFullOrYorker) {
-          commentary = `💔 CAUGHT! Sliced off the toe-end! Reached across to pull a slow, full ball from the back foot and looped a soft catch to the infielder!`;
+          commentary = `💔 CAUGHT! Crisp swing, poor shot selection — reached across on the back foot to pull a full ball and sliced a catch into the ring!`;
         } else if (isFrontFootToShort) {
           mismatchZone = 'Mid Wicket';
-          commentary = `💔 CAUGHT! Pushed on the front foot to a bouncer, looped off the splice to short mid-wicket!`;
+          commentary = `💔 CAUGHT! Committed to the front foot against a bouncer, fended off the splice to short mid-wicket!`;
         } else {
-          commentary = `💔 CAUGHT! Completely deceived by line and length, giving a simple catch to the infield!`;
+          commentary = `💔 CAUGHT! Wrong footwork for line and length gave an awkward leading edge to the infield!`;
         }
         outcomeType = 'Out';
-      } else if (Math.random() < 0.70) {
+      } else if (Math.random() < 0.68) {
         runs = 0;
         outcomeType = 'Dot';
         if (isPullOnFullOrYorker) {
           dismissalDetail = 'block';
-          commentary = `⚠️ Bottom-edged into the pitch! Attempted a back-foot pull against a full delivery outside off. Drops dead into the turf, no run.`;
+          commentary = `⚠️ Jammed off the bottom edge! Timed the swing cleanly, but pulling a full delivery from the back foot digs it into the turf. Dot ball.`;
         } else if (isFrontFootToShort) {
           dismissalDetail = 'keeper';
-          commentary = `💨 Beaten by steep bounce! Tried to drive a bouncer on the front foot; whistled past helmet into keeper's gloves. Dot ball.`;
+          commentary = `💨 Steep bounce beat the front-foot drive despite a clean swing — whistles into the keeper's gloves. Dot ball.`;
         } else {
           dismissalDetail = 'keeper';
-          commentary = `💨 Completely beaten by the movement and pace. Swung through awkwardly into the keeper's gloves, dot ball.`;
+          commentary = `💨 Cramped by poor shot selection despite fair swing timing — sneaks past the edge to the keeper. Dot ball.`;
         }
       } else {
         runs = 1;
         outcomeType = 'Run';
         if (isPullOnFullOrYorker) {
           mismatchZone = 'Third Man';
-          commentary = `🏃 Thick edge squirts away! Completely mistimed the back-foot pull against the slow full ball; trickles past slip for a scramble single.`;
+          commentary = `🏃 Thick edge squirts away! Forced a back-foot pull to a full delivery; trickles past slip for a scramble single.`;
         } else {
-          commentary = `🏃 Awkwardly squirted off the toe-end into the gap for a single.`;
+          commentary = `🏃 Cramped shot squeezed off the inside half into the gap for a single.`;
         }
       }
       return {
@@ -1269,8 +1306,11 @@ export function simulateBallAdvanced({
         actualLine: line,
         actualZone: mismatchZone,
         commentary,
-        timing: adjustedTiming,
+        timing: playerInputTiming,
+        inputTiming: playerInputTiming,
+        executionTiming: adjustedTiming,
         matchupStar,
+        shotSelection: buildShotSelectionFeedback(matchupStar, selectionReasons[0] || 'Poor shot selection'),
         outcomeType,
         nextIsFreeHit,
         rebowl
@@ -1781,6 +1821,10 @@ export function simulateBallAdvanced({
     finalCommentary += commentary;
   }
 
+  const finalSelectionReason = extraType === 'wide'
+    ? 'Wide delivery outside off'
+    : (selectionReasons[0] || (matchupStar >= 3.75 ? 'Ideal footwork & line' : matchupStar >= 3.0 ? 'Solid shot matchup' : 'Against the line'));
+
   return {
     runs: runs + extraRuns,
     wicket,
@@ -1788,8 +1832,11 @@ export function simulateBallAdvanced({
     dismissalDetail,
     extraType,
     actualLine,
-    timing: adjustedTiming,
+    timing: playerInputTiming,
+    inputTiming: playerInputTiming,
+    executionTiming: adjustedTiming,
     matchupStar,
+    shotSelection: buildShotSelectionFeedback(matchupStar, finalSelectionReason),
     actualZone: ZONE_NAMES[finalZone] || effectiveZone,
     directionMismatch: directionMismatchOccurred,
     commentary: finalCommentary,

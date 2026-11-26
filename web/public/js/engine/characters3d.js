@@ -159,33 +159,33 @@ export function createStickCricketer({
   const armR = makeArm(0.34);
   torso.add(armL, armR);
 
-  // 3D English Willow Bat Pivot (attached cleanly for batter / non-striker)
+  // 3D English Willow Bat Pivot (held cleanly out in front in both gloved hands, never through legs)
   let batPivot = null;
   if (role === 'batsman' || role === 'nonstriker') {
     batPivot = new THREE.Group();
-    batPivot.position.set(0, 0.44, 0.24);
+    batPivot.position.set(0, 0.24, 0.40);
     torso.add(batPivot);
 
     const grip = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.032, 0.032, 0.34, 10),
+      new THREE.CylinderGeometry(0.032, 0.032, 0.30, 10),
       new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.7 })
     );
-    grip.position.y = -0.17;
+    grip.position.y = -0.15;
     batPivot.add(grip);
 
     const blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.78, 0.075),
+      new THREE.BoxGeometry(0.16, 0.74, 0.075),
       new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.45 })
     );
-    blade.position.y = -0.71;
+    blade.position.y = -0.66;
     blade.castShadow = true;
     batPivot.add(blade);
 
     const sticker = new THREE.Mesh(
-      new THREE.BoxGeometry(0.145, 0.30, 0.082),
+      new THREE.BoxGeometry(0.145, 0.28, 0.082),
       new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 })
     );
-    sticker.position.y = -0.68;
+    sticker.position.y = -0.62;
     batPivot.add(sticker);
   }
 
@@ -256,7 +256,8 @@ export function animateBatterRig(rig, {
     rig.armR.rotation.x = stride * 0.8;
     rig.torso.rotation.x = 0.16;
     if (rig.batPivot) {
-      rig.batPivot.rotation.set(-0.35, 0, dir * 0.25);
+      rig.batPivot.position.set(0, 0.28, 0.36);
+      rig.batPivot.rotation.set(-0.65, 0, dir * 0.25);
     }
     return;
   }
@@ -269,33 +270,39 @@ export function animateBatterRig(rig, {
   rig.legR.rotation.x = -0.08;
 
   if (stage === 'idle' || stage === 'runup') {
-    // Rhythmic crease bat tap while awaiting delivery
+    // Rhythmic crease bat tap OUT IN FRONT (+Z) of pads, held cleanly in both gloved hands
     const tap = Math.max(0, Math.sin(timeSec * 4.4)) * 0.14;
     rig.torso.rotation.x = 0.14;
-    rig.armL.rotation.set(-0.62, 0, 0.22 * sideMul);
-    rig.armR.rotation.set(-0.74 - tap, 0, -0.22 * sideMul);
+    rig.armL.rotation.set(-0.72, 0, 0.30 * sideMul);
+    rig.armR.rotation.set(-0.78 - tap * 0.4, 0, -0.30 * sideMul);
     if (rig.batPivot) {
-      rig.batPivot.rotation.set(0.32 + tap * 0.9, 0, -dir * 0.16);
+      rig.batPivot.position.set(0, 0.22 - tap * 0.04, 0.40);
+      // Negative rotation.x angles (-Y) bat blade FORWARD (+Z) in front of toes, never between legs!
+      rig.batPivot.rotation.set(-0.36 - tap * 0.35, 0, -dir * 0.14);
     }
   } else if (stage === 'delivery') {
-    // Trigger high Backlift as ball rushes down the pitch!
+    // Trigger clean Backlift up over the back shoulder (-X*dir) as ball approaches!
     const lift = Math.min(1, progress * 1.35);
     rig.torso.rotation.x = 0.16 - lift * 0.06;
     rig.torso.rotation.y = -dir * lift * 0.24;
-    rig.armL.rotation.set(-0.7 - lift * 0.65, 0, 0.15 * sideMul);
-    rig.armR.rotation.set(-0.8 - lift * 0.85, 0, -0.15 * sideMul);
+    rig.armL.rotation.set(-0.78 - lift * 0.55, 0, (0.28 - lift * 0.18) * sideMul);
+    rig.armR.rotation.set(-0.84 - lift * 0.65, 0, (-0.28 + lift * 0.18) * sideMul);
     if (rig.batPivot) {
-      rig.batPivot.rotation.set(0.32 + lift * 1.25, 0, -dir * 0.25);
+      rig.batPivot.position.set(0, 0.24 + lift * 0.20, 0.38);
+      rig.batPivot.rotation.set(-0.42, 0, -dir * (0.14 + lift * 2.02));
     }
   } else if (stage === 'outcome') {
     const t = Math.min(1, progress * 3.8);
     const swingEase = Math.sin(Math.min(1, t) * Math.PI * 0.5);
     if (isLeave) {
-      // Shouldered arms safely above stumps
+      // Shouldered arms safely above off-stump
       rig.torso.rotation.y = -dir * 0.22;
       rig.armL.rotation.set(-1.35, 0, 0.35 * sideMul);
       rig.armR.rotation.set(-1.45, 0, -0.25 * sideMul);
-      if (rig.batPivot) rig.batPivot.rotation.set(-1.95, 0, dir * 0.35);
+      if (rig.batPivot) {
+        rig.batPivot.position.set(0, 0.44, 0.34);
+        rig.batPivot.rotation.set(-0.35, 0, -dir * 2.35);
+      }
       return;
     }
 
@@ -303,22 +310,25 @@ export function animateBatterRig(rig, {
     const isLofted = String(intent || '').toLowerCase().includes('loft') || String(intent || '').toLowerCase().includes('aggr');
 
     if (isPull) {
-      // Horizontal pull / sweep swing across to leg side!
-      rig.torso.rotation.y = dir * (0.25 + swingEase * 1.05);
-      rig.armL.rotation.set(-1.1, dir * swingEase * 0.9, 0.3 * sideMul);
-      rig.armR.rotation.set(-1.2, dir * swingEase * 0.9, -0.3 * sideMul);
+      // Horizontal pull / sweep swing across chest out in front of pads!
+      rig.torso.rotation.y = dir * (0.20 + swingEase * 1.05);
+      rig.armL.rotation.set(-1.12, dir * swingEase * 0.85, 0.25 * sideMul);
+      rig.armR.rotation.set(-1.20, dir * swingEase * 0.85, -0.25 * sideMul);
       if (rig.batPivot) {
-        rig.batPivot.rotation.set(0.85 - swingEase * 2.1, dir * swingEase * 1.1, dir * 1.15);
+        rig.batPivot.position.set(0, 0.38, 0.42);
+        rig.batPivot.rotation.set(-1.25, dir * (0.15 + swingEase * 1.15), -dir * (0.95 - swingEase * 2.15));
       }
     } else {
-      // Crisp Flowing Drive / Lofted Arc through the line!
-      const followArc = isLofted ? 2.65 : 1.95;
-      rig.torso.rotation.x = 0.22 - swingEase * 0.14;
-      rig.torso.rotation.y = dir * (0.18 - swingEase * 0.42);
-      rig.armL.rotation.set(-0.6 - swingEase * (isLofted ? 1.5 : 0.9), 0, 0.18 * sideMul);
-      rig.armR.rotation.set(-0.65 - swingEase * (isLofted ? 1.6 : 1.0), 0, -0.18 * sideMul);
+      // Crisp Flowing Drive / Lofted Arc sweeping down from backlift through impact (+Z) to high follow-through!
+      const followEndZ = isLofted ? 2.25 : 1.55;
+      const swingZ = -dir * 2.16 + swingEase * dir * (2.16 + followEndZ);
+      rig.torso.rotation.x = 0.20 - swingEase * 0.14;
+      rig.torso.rotation.y = dir * (0.16 - swingEase * 0.38);
+      rig.armL.rotation.set(-0.80 - swingEase * (isLofted ? 1.15 : 0.65), 0, 0.22 * sideMul);
+      rig.armR.rotation.set(-0.85 - swingEase * (isLofted ? 1.25 : 0.72), 0, -0.22 * sideMul);
       if (rig.batPivot) {
-        rig.batPivot.rotation.set(1.55 - swingEase * followArc, 0, dir * 0.15);
+        rig.batPivot.position.set(0, 0.26 + swingEase * 0.20, 0.44);
+        rig.batPivot.rotation.set(-0.58 - swingEase * 0.28, 0, swingZ);
       }
     }
   }

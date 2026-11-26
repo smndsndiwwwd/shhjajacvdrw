@@ -11,6 +11,7 @@ import {
   resolveStoryEventChoice,
   computeTimingProfile,
   resolveBattingTiming,
+  buildTimingFeedback,
   buildInitialReleaseCue,
   buildFullDeliveryReveal
 } from '../lib/matchEngine.js';
@@ -808,6 +809,7 @@ async function enrichChallengeRow(database, row) {
         ? { ...deliv, line: sim.actualLine }
         : { ...deliv };
       const finalZoneName = isLeave ? 'In Line' : (sim.actualZone || zone);
+      const timingFeedback = buildTimingFeedback(sim.timing, isLeave ? 50 : parsedNeedle, timingProfile);
       state.lastBall = {
         runs: sim.runs,
         wicket: Boolean(sim.wicket),
@@ -816,6 +818,8 @@ async function enrichChallengeRow(database, row) {
         extraType: sim.extraType || '',
         rebowl: Boolean(sim.rebowl),
         timing: sim.timing,
+        timingFeedback,
+        shotSelection: sim.shotSelection || null,
         shotName,
         footwork,
         intent: isLeave ? 'Leave' : intent,
@@ -834,7 +838,7 @@ async function enrichChallengeRow(database, row) {
       );
       if (state.recentBalls.length > 6) state.recentBalls = state.recentBalls.slice(-6);
 
-      state.log.unshift(`Ball ${state.balls}: ${effectiveDeliv.length} ${effectiveDeliv.line} ➔ ${shotName} [${sim.timing}] — ${sim.commentary}`);
+      state.log.unshift(`Ball ${state.balls}: ${effectiveDeliv.length} ${effectiveDeliv.line} ➔ ${shotName} [${timingFeedback.label}] — ${sim.commentary}`);
       state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)', state.aiBowlerType || 'pace') : null;
 
       const batterWon = state.runs >= state.targetRuns;

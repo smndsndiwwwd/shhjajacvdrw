@@ -1,6 +1,7 @@
 import { api, esc, formatRichText, toast } from '../api.js';
 import { caIcon } from '../components/icons.js';
 import { renderHawkEyePitchSVG } from '../components/gearSvg.js';
+import { buildTimingBarGradient, renderOutcomeBannerWithFeedback } from '../components/shotFeedback.js';
 import { CricketArcadeRenderer, WAGON_ZONES } from '../engine/cricketCanvas.js';
 import { cricketAudio } from '../engine/cricketAudio.js';
 
@@ -122,45 +123,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     `;
   };
 
-  const renderOutcomeBanner = (lb) => {
-    if (!lb) return '';
-    let cls = '';
-    let icon = String(lb.runs);
-    let label = `${lb.runs} Run${lb.runs === 1 ? '' : 's'}`;
-    if (lb.wicket) {
-      cls = 'is-wicket';
-      icon = 'W';
-      const dt = String(lb.dismissalType || '').toUpperCase();
-      label = dt && dt !== 'NOT OUT' ? `WICKET (${dt})!` : 'WICKET!';
-    } else if (lb.extraType === 'no_ball') {
-      icon = 'NB';
-      const batRuns = Math.max(0, (lb.runs || 0) - 1);
-      if (batRuns >= 6) { cls = 'is-six'; label = 'NO BALL + SIX! 🔥'; }
-      else if (batRuns >= 4) { cls = 'is-four'; label = 'NO BALL + FOUR! ⚡'; }
-      else label = `NO BALL (+${lb.runs || 1}) • FREE HIT!`;
-    } else if (lb.rebowl) {
-      icon = 'WD';
-      label = 'WIDE (+1)';
-    } else if (lb.runs === 6) { cls = 'is-six'; icon = '6!'; label = 'MAXIMUM SIX!'; }
-    else if (lb.runs === 4) { cls = 'is-four'; icon = '4!'; label = 'CRACKING FOUR!'; }
-    else if (lb.runs === 0) { icon = '•'; label = 'DOT BALL'; }
-
-    return `
-      <div class="outcome-flash ${cls}" style="margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div class="outcome-badge">${icon}</div>
-          <div>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <strong>${label}</strong>
-              <span class="badge badge-cyan">${esc(lb.timing)}</span>
-              <span class="badge badge-muted">${esc(lb.shotName)}</span>
-            </div>
-            <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;line-height:1.45;">${formatRichText(lb.commentary)}</div>
-          </div>
-        </div>
-      </div>
-    `;
-  };
+  const renderOutcomeBanner = (lb) => renderOutcomeBannerWithFeedback(lb);
 
   const getCurrentBallHint = () => {
     if (match?.currentBallPreview?.length) return match.currentBallPreview;
@@ -386,11 +349,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     if (match.phase === 'batting') {
       const isLeave = selFootwork === 'Leave' || selIntent === 'Leave';
       const tp = match.timingProfile || { sweetHalf: 17, goodHalf: 38, eqTimingBonus: 0, playerEdge: 30, bowlerThreat: 25 };
-      const redL = Math.max(2, Math.round(50 - tp.goodHalf));
-      const greenL = Math.max(redL + 4, Math.round(50 - tp.sweetHalf));
-      const greenR = Math.min(96, Math.round(50 + tp.sweetHalf));
-      const redR = Math.min(98, Math.round(50 + tp.goodHalf));
-      const barBg = `linear-gradient(90deg, #ef4444 0%, #f59e0b ${redL}%, #10b981 ${greenL}%, #34d399 50%, #10b981 ${greenR}%, #f59e0b ${redR}%, #ef4444 100%)`;
+      const barBg = buildTimingBarGradient(tp);
 
       // Only reveal FULL delivery at Step 4 ('zone'); Steps 1–3 show ONLY subtle initial cue!
       const topBanner = batStep === 'zone'
@@ -502,8 +461,8 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
               <div class="timing-bar" style="background:${barBg};">
                 <div class="timing-needle" id="timing-needle"></div>
               </div>
-              <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--text-muted);margin-top:4px;">
-                <span>Early</span><span>Slight Early</span><span style="color:var(--emerald);font-weight:700;">SWEET SPOT</span><span>Slight Late</span><span>Late</span>
+              <div class="c26-scale-labels" style="margin-top:4px;">
+                <span>Very Early</span><span>OK</span><span>Good</span><span style="color:#34d399;font-weight:700;">IDEAL</span><span>Good</span><span>OK</span><span>Very Late</span>
               </div>
             ` : `<div style="font-size:0.82rem;color:var(--text-muted);">Auto-roll weighs Gear Timing (+${tp.eqTimingBonus}) &amp; Confidence vs Bowler (${tp.bowlerThreat}).</div>`}
           </div>

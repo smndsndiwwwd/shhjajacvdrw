@@ -708,6 +708,93 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   background: rgba(255,255,255,0.06);
 }
 
+/* Cricket-26 Style Post-Ball Timing & Shot Selection Feedback Bars */
+.c26-feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+@media (max-width: 640px) {
+  .c26-feedback-grid { grid-template-columns: 1fr; }
+}
+.c26-meter-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.c26-meter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.c26-meter-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.69rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #e2e8f0;
+}
+.c26-reason {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+}
+.c26-grade-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.c26-grade-pill.grade-ideal { background: rgba(16, 185, 129, 0.22); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); }
+.c26-grade-pill.grade-good { background: rgba(132, 204, 22, 0.20); color: #a3e635; border: 1px solid rgba(132, 204, 22, 0.45); }
+.c26-grade-pill.grade-ok { background: rgba(245, 158, 11, 0.20); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); }
+.c26-grade-pill.grade-poor { background: rgba(239, 68, 68, 0.22); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); }
+.c26-track {
+  position: relative;
+  height: 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  overflow: visible;
+}
+.c26-selection-track {
+  background: linear-gradient(90deg, #dc2626 0%, #dc2626 24%, #f59e0b 24%, #f59e0b 52%, #84cc16 52%, #84cc16 78%, #10b981 78%, #10b981 100%);
+}
+.c26-center-tick {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.55);
+  transform: translateX(-50%);
+}
+.c26-pin {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 5px;
+  border-radius: 3px;
+  background: #ffffff;
+  border: 1px solid #020617;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.95);
+  transform: translateX(-50%);
+}
+.c26-scale-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
+
 /* Visual 6-Slot Equipped Gear Locker */
 .locker-split {
   display: grid;
