@@ -73,7 +73,7 @@ export function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(json);
 }
 
-export function serveStaticFile(res, publicDir, urlPath) {
+export function serveStaticFile(res, publicDir, urlPath, req = null) {
   const cleanPath = urlPath.split('?')[0];
   let relPath = cleanPath === '/' ? 'index.html' : cleanPath.replace(/^\/+/, '');
   relPath = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, '');
@@ -97,6 +97,23 @@ export function serveStaticFile(res, publicDir, urlPath) {
 
   const ext = path.extname(targetPath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+  if (ext === '.html' && path.basename(targetPath) === 'index.html') {
+    let html = fs.readFileSync(targetPath, 'utf8');
+    const host = req?.headers?.['x-forwarded-host'] || req?.headers?.host;
+    if (host) {
+      const proto = String(req?.headers?.['x-forwarded-proto'] || (host.includes('localhost') || host.startsWith('127.') ? 'http' : 'https')).split(',')[0].trim();
+      const origin = `${proto}://${String(host).split(',')[0].trim()}`;
+      html = html.replace(/https:\/\/cricket-ascend\.onrender\.com/g, origin);
+    }
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache'
+    });
+    res.end(html);
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': contentType });
   fs.createReadStream(targetPath).pipe(res);
 }

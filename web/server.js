@@ -68,7 +68,7 @@ export async function handleWebRequest(req, res, { serveStatic = true } = {}) {
     }
 
     if (serveStatic) {
-      serveStaticFile(res, PUBLIC_DIR, pathname);
+      serveStaticFile(res, PUBLIC_DIR, pathname, req);
     } else {
       sendJson(res, 404, { error: 'Not found' });
     }
