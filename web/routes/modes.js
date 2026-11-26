@@ -804,22 +804,37 @@ async function enrichChallengeRow(database, row) {
       state.freeHit = Boolean(sim.nextIsFreeHit);
 
       const shotName = isLeave ? 'Leave' : (equippedShot ? equippedShot.name : getDerivedShotName(footwork, intent, zone));
+      const effectiveDeliv = sim.actualLine && sim.actualLine !== deliv.line
+        ? { ...deliv, line: sim.actualLine }
+        : { ...deliv };
+      const finalZoneName = isLeave ? 'In Line' : (sim.actualZone || zone);
       state.lastBall = {
         runs: sim.runs,
         wicket: Boolean(sim.wicket),
+        dismissalType: sim.dismissalType || 'not out',
+        dismissalDetail: sim.dismissalDetail || '',
+        extraType: sim.extraType || '',
         rebowl: Boolean(sim.rebowl),
         timing: sim.timing,
         shotName,
-        zone: isLeave ? 'In Line' : (sim.actualZone || zone),
-        actualZone: isLeave ? 'In Line' : (sim.actualZone || zone),
+        footwork,
+        intent: isLeave ? 'Leave' : intent,
+        stance,
+        zone: finalZoneName,
+        actualZone: finalZoneName,
         commentary: sim.commentary,
-        delivery: { ...deliv }
+        delivery: effectiveDeliv
       };
       if (!Array.isArray(state.recentBalls)) state.recentBalls = [];
-      state.recentBalls.push(sim.wicket ? 'W' : sim.rebowl ? 'WD' : String(sim.runs));
+      state.recentBalls.push(
+        sim.wicket ? 'W' :
+        sim.extraType === 'no_ball' ? 'NB' :
+        sim.rebowl ? 'WD' :
+        String(sim.runs)
+      );
       if (state.recentBalls.length > 6) state.recentBalls = state.recentBalls.slice(-6);
 
-      state.log.unshift(`Ball ${state.balls}: ${deliv.length} ${deliv.line} ➔ ${shotName} [${sim.timing}] — ${sim.commentary}`);
+      state.log.unshift(`Ball ${state.balls}: ${effectiveDeliv.length} ${effectiveDeliv.line} ➔ ${shotName} [${sim.timing}] — ${sim.commentary}`);
       state.pendingDelivery = isAiOpponent ? generateBowlerDelivery('Flat Belter (Batting Paradise)', state.aiBowlerType || 'pace') : null;
 
       const batterWon = state.runs >= state.targetRuns;

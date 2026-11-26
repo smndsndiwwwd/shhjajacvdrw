@@ -169,11 +169,13 @@ export class CricketArcadeRenderer {
   syncHudDom() {
     if (!this.hudEl) return;
     const s = this.state;
+    const modeEl = this.hudEl.querySelector('.tv-badge-live');
     const scoreEl = this.hudEl.querySelector('[data-hud="score"]');
     const oversEl = this.hudEl.querySelector('[data-hud="overs"]');
     const targetEl = this.hudEl.querySelector('[data-hud="target"]');
     const ruleEl = this.hudEl.querySelector('[data-hud="rule"]');
 
+    if (modeEl) modeEl.textContent = s.hud?.modeLabel || '3D LIVE';
     if (s.hud) {
       if (scoreEl) scoreEl.textContent = s.hud.score || 'Match Ready';
       if (oversEl) oversEl.textContent = s.hud.overs || '';
@@ -645,53 +647,97 @@ export class CricketArcadeRenderer {
     const lb = ballResult || {};
     const deliv = lb.delivery || { line: 'Stumps', length: 'Good Length', speed: 'Fast' };
     const bouncePt = this.deliveryToWorldPoint(deliv);
-    const zone = options.zone || lb.zone || this.state.selectedZone || 'Cover';
+    const zone = lb.actualZone || options.zone || lb.zone || this.state.selectedZone || 'Cover';
     const shotAng = getZoneWorldAngle(zone, this.state.isLeftHand);
     const dirX = Math.cos(shotAng);
     const dirZ = Math.sin(shotAng);
     const distRope = this.distanceToBoundaryFromStriker(dirX, dirZ);
-    const isLeave = String(lb.shotName || '').toLowerCase().includes('leave');
+
+    const detail = lb.dismissalDetail || '';
+    const dType = String(lb.dismissalType || '').toLowerCase();
+    const isNoBall = lb.extraType === 'no_ball';
+    const isWide = lb.extraType === 'wide' || (!isNoBall && lb.rebowl);
+    const isLeave = lb.footwork === 'Leave' || lb.intent === 'Leave' || String(lb.shotName || '').toLowerCase().includes('leave');
     const lowerComm = String(lb.commentary || '').toLowerCase();
-    const isBowledOrLbw = lb.wicket && (lowerComm.includes('bowled') || lowerComm.includes('lbw') || lowerComm.includes('stumps') || lowerComm.includes('timber'));
+
+    const isStumped = dType === 'stumped' || detail === 'stumped';
+    const isBowled = dType === 'bowled' || detail === 'bowled';
+    const isLbw = dType === 'lbw' || detail === 'lbw';
+    const isFreeHitBowled = detail === 'free_hit_bowled';
+    const isStumpsBroken = isBowled || isStumped || isFreeHitBowled ||
+      (lb.wicket && !isLbw && (lowerComm.includes('bowled') || lowerComm.includes('stumps') || lowerComm.includes('timber') || lowerComm.includes('stumped')));
+    const isKeeperTake = isWide || detail === 'keeper' ||
+      (lb.wicket && !isStumpsBroken && !isLbw && (lowerComm.includes('keeper') || lowerComm.includes('caught behind')));
+    const isBlockDrop = detail === 'block';
+    const isDeepCatch = Boolean(lb.wicket && (detail === 'deep' || lowerComm.includes('deep') || lowerComm.includes('boundary')));
+    const isRingHitOrCatch = (lb.wicket && !isStumpsBroken && !isLbw && !isKeeperTake && !isDeepCatch) || (!lb.wicket && lb.runs === 0 && detail === 'ring');
+    const batRuns = isNoBall ? Math.max(0, (lb.runs || 0) - 1) : (lb.runs || 0);
 
     this.resetStrikerStumps();
     this.trailPoints = [];
     this.trailGeo.setDrawRange(0, 0);
     this.syncFielders();
     this.fielders.forEach(f => { f.diveT = 0; });
+    if (this.keeperRig) {
+      // Keeper stands right up to stumps for Spin/Stumped, further back for pace
+      const isSlow = String(deliv.speed || '').toLowerCase() === 'slow';
+      this.keeperRig.root.position.set(0, 0, WORLD.STRIKER_Z + ((isSlow || isStumped) ? 1.35 : 3.2));
+    }
 
-    const speedMul = deliv.speed === 'Fast' ? 1.15 : deliv.speed === 'Slow' ? 0.85 : 1.0;
+    const speedMul = deliv.speed === 'Fast' ? 1.22 : deliv.speed === 'Slow' ? 0.72 : 0.96;
 
     let landDist = 0;
     let peakY = 1.6;
     let endY = 0.18;
-    if (lb.rebowl || isLeave || isBowledOrLbw) {
+    let outcomeMode = 'shot'; // 'shot' | 'stumps' | 'lbw' | 'keeper' | 'block' | 'catch_ring' | 'catch_deep'
+
+    if (isStumpsBroken) {
+      outcomeMode = 'stumps';
       landDist = 0;
-      peakY = 1.2;
-    } else if (lb.runs === 6) {
-      // Sails cleanly over the boundary hoardings into the 3D stands!
+      peakY = 0.6;
+    } else if (isLbw) {
+      outcomeMode = 'lbw';
+      landDist = 0;
+      peakY = 0.55;
+    } else if (isKeeperTake) {
+      outcomeMode = 'keeper';
+      landDist = 0;
+      peakY = 1.1;
+    } else if (isBlockDrop) {
+      outcomeMode = 'block';
+      landDist = 1.9;
+      peakY = 0.45;
+    } else if (isDeepCatch) {
+      outcomeMode = 'catch_deep';
+      landDist = distRope * 0.88;
+      peakY = 12.5;
+      endY = 1.25;
+    } else if (isRingHitOrCatch) {
+      outcomeMode = lb.wicket ? 'catch_ring' : 'shot';
+      landDist = distRope * 0.34;
+      peakY = lb.wicket ? 6.2 : 0.95;
+      endY = lb.wicket ? 1.25 : 0.18;
+    } else if (batRuns >= 6) {
       landDist = distRope + 14;
       peakY = 17.5;
       endY = 4.5;
-    } else if (lb.runs === 4) {
+    } else if (batRuns >= 4) {
       landDist = distRope + 1.8;
       peakY = 3.2;
       endY = 0.2;
-    } else if (lb.runs === 3) {
+    } else if (batRuns === 3) {
       landDist = distRope * 0.86;
       peakY = 4.6;
-    } else if (lb.runs === 2) {
+    } else if (batRuns === 2) {
       landDist = distRope * 0.65;
       peakY = 3.9;
-    } else if (lb.runs === 1) {
+    } else if (batRuns === 1) {
       landDist = distRope * 0.44;
       peakY = 2.4;
-    } else if (lb.wicket) {
-      landDist = distRope * 0.46;
-      peakY = lowerComm.includes('caught') ? 9.5 : 2.2;
     } else {
-      landDist = Math.min(distRope * 0.20, 9.0);
-      peakY = 1.3;
+      outcomeMode = 'block';
+      landDist = 2.6;
+      peakY = 0.6;
     }
 
     const endX = dirX * landDist;
@@ -702,20 +748,32 @@ export class CricketArcadeRenderer {
       stage: 'runup',
       runupDur: 0.48 / speedMul,
       delivDur: 0.54 / speedMul,
-      outDur: (lb.runs >= 4 || lb.wicket || lb.runs >= 1) ? 1.50 : 0.72,
+      outDur: (batRuns >= 4 || lb.wicket || batRuns >= 1) ? 1.50 : 0.78,
       bouncePt,
       zone,
       endX,
       endZ,
       peakY,
       endY,
+      batRuns,
+      outcomeMode,
+      isWide,
+      isNoBall,
       isLeave,
-      isBowledOrLbw,
+      isStumped,
+      isBowled,
+      isLbw,
+      isFreeHitBowled,
+      isStumpsBroken,
+      isKeeperTake,
+      shotIntent: lb.intent || 'Stroke',
+      shotFootwork: lb.footwork || 'Front Foot',
+      shotStance: lb.stance || 'In Line',
       bouncedPlayed: false,
       outcomeTriggered: false,
       lb,
       ball: new THREE.Vector3(-0.35, 1.8, WORLD.BOWLER_Z - 7.5),
-      runCrossings: lb.wicket ? 0 : (lb.runs === 4 || lb.runs === 6 ? 0 : Math.min(3, lb.runs || 0))
+      runCrossings: (lb.wicket || isWide) ? 0 : (batRuns === 4 || batRuns === 6 ? 0 : Math.min(3, batRuns || 0))
     };
 
     this.ballGroup.visible = false;
@@ -893,7 +951,7 @@ export class CricketArcadeRenderer {
         const sub = (p - bounceP) / (1 - bounceP);
         a.ball.x = a.bouncePt.wx * (1 - sub * 0.72);
         a.ball.z = a.bouncePt.wz + (WORLD.STRIKER_Z - a.bouncePt.wz) * sub;
-        const apex = a.lb.delivery?.length === 'Short' ? 2.1 : 1.05;
+        const apex = a.lb.delivery?.length === 'Short' ? 2.15 : a.lb.delivery?.speed === 'Slow' ? 1.65 : 1.05;
         a.ball.y = Math.sin(sub * Math.PI * 0.78) * apex + 0.35;
       }
 
@@ -927,7 +985,7 @@ export class CricketArcadeRenderer {
 
       animateBatterRig(this.batterRig, {
         isLeftHand: this.state.isLeftHand,
-        intent: this.state.selectedIntent,
+        intent: a.shotIntent || this.state.selectedIntent,
         zone: a.zone,
         isLeave: a.isLeave,
         stage: 'outcome',
@@ -939,16 +997,30 @@ export class CricketArcadeRenderer {
         animateBatterRig(this.nonStrikerRig, { stage: 'outcome', runCrossings: a.runCrossings, timeSec });
       }
 
-      if (!a.isLeave && !lb.rebowl && !a.isBowledOrLbw && (lb.runs > 0 || lb.wicket)) {
+      if (a.outcomeMode === 'stumps') {
+        a.ball.set(0, 0.42, WORLD.STRIKER_Z + Math.min(2.4, p * 3.0));
+        this.syncBallTransform(a.ball, 0xf43f5e, dt);
+        this.updateCamera(dt, timeSec, null);
+      } else if (a.outcomeMode === 'lbw') {
+        a.ball.set(guardX * 0.35, Math.max(0.18, 0.48 * (1 - p * 0.6)), WORLD.STRIKER_Z - 0.55);
+        this.syncBallTransform(a.ball, 0xf43f5e, dt);
+        this.updateCamera(dt, timeSec, null);
+      } else if (a.outcomeMode === 'keeper') {
+        const keeperZ = this.keeperRig ? this.keeperRig.root.position.z : (WORLD.STRIKER_Z + 2.6);
+        const sideX = a.lb.wicket ? (this.state.isLeftHand ? -0.45 : 0.45) : (a.bouncePt.wx * 0.9);
+        a.ball.set(sideX, 1.05, WORLD.STRIKER_Z + Math.min(keeperZ - WORLD.STRIKER_Z, p * 4.5));
+        this.syncBallTransform(a.ball, a.isWide ? 0xfbbf24 : 0x94a3b8, dt);
+        this.updateCamera(dt, timeSec, null);
+      } else {
         a.ball.x = a.endX * easeOut;
         a.ball.z = WORLD.STRIKER_Z + (a.endZ - WORLD.STRIKER_Z) * easeOut;
         a.ball.y = Math.max(0.16, Math.sin(p * Math.PI) * a.peakY + a.endY * p);
 
-        const tColor = lb.runs === 6 ? 0xf59e0b : lb.runs === 4 ? 0x10b981 : 0xf8fafc;
+        const tColor = a.batRuns >= 6 ? 0xf59e0b : a.batRuns >= 4 ? 0x10b981 : 0xf8fafc;
         this.syncBallTransform(a.ball, tColor, dt);
 
-        // Closest Fielder Chases & Dives for the Ball!
-        if (p > 0.08 && this.fielders.length > 0) {
+        // Closest Fielder Chases & Dives/Catches the Ball!
+        if (p > 0.08 && this.fielders.length > 0 && a.outcomeMode !== 'block') {
           let nearest = null;
           let bestD = Infinity;
           for (const f of this.fielders) {
@@ -965,11 +1037,11 @@ export class CricketArcadeRenderer {
             const dist = Math.hypot(dx, dz);
             const ang = Math.atan2(dx, dz);
             if (dist > 0.25) {
-              const step = Math.min(dist, 14.5 * dt);
+              const step = Math.min(dist, 15.5 * dt);
               nearest.wx += (dx / dist) * step;
               nearest.wz += (dz / dist) * step;
               nearest.rig.root.position.set(nearest.wx, 0, nearest.wz);
-              const isDiving = dist < 3.4 && (lb.runs === 4 || lb.wicket) && p > 0.52;
+              const isDiving = dist < 3.4 && (a.batRuns === 4 || lb.wicket) && p > 0.52;
               if (isDiving) nearest.diveT = Math.min(1, nearest.diveT + dt * 2.4);
               animateFielderRig(nearest.rig, {
                 moving: !isDiving,
@@ -982,11 +1054,7 @@ export class CricketArcadeRenderer {
           }
         }
 
-        this.updateCamera(dt, timeSec, a.ball);
-      } else {
-        a.ball.set(0, 0.22, WORLD.STRIKER_Z + Math.min(3.2, p * 4.0));
-        this.syncBallTransform(a.ball, 0x94a3b8, dt);
-        this.updateCamera(dt, timeSec, null);
+        this.updateCamera(dt, timeSec, a.outcomeMode === 'block' ? null : a.ball);
       }
 
       if (p >= 1) {
@@ -1013,49 +1081,81 @@ export class CricketArcadeRenderer {
 
   triggerShotImpactOutcome(a) {
     const lb = a.lb;
-    const lowerComm = String(lb.commentary || '').toLowerCase();
 
     if (lb.wicket) {
       this.hitStopTimer = 0.065;
       this.cameraShake = 0.42;
       this.crowdExcitement = 1.0;
-      if (a.isBowledOrLbw || lowerComm.includes('run out') || lowerComm.includes('stumped')) {
+      if (a.isStumpsBroken) {
         this.dislodgeStumps();
       } else {
         cricketAudio.playBatCrack(lb.timing || 'Slightly Late');
       }
       cricketAudio.playCrowdCheer(1.3);
-      this.showCallout(a.isBowledOrLbw ? 'BOWLED! 💥' : 'OUT! 💥', '#fb7185', 'rgba(244,63,94,0.34)');
-    } else if (lb.rebowl) {
+      const callout = a.isStumped ? 'STUMPED! 💥'
+        : a.isBowled ? 'BOWLED! 💥'
+        : a.isLbw ? 'LBW! OUT! 💥'
+        : a.isKeeperTake ? 'CAUGHT BEHIND! 💥'
+        : a.outcomeMode === 'catch_deep' ? 'CAUGHT DEEP! 💥'
+        : 'CAUGHT! 💥';
+      this.showCallout(callout, '#fb7185', 'rgba(244,63,94,0.34)');
+    } else if (a.isWide) {
       this.showCallout('WIDE (+1)', '#fbbf24');
+    } else if (a.isNoBall) {
+      if (a.isFreeHitBowled) this.dislodgeStumps();
+      else if (!a.isLeave && a.batRuns > 0) cricketAudio.playBatCrack(lb.timing || 'Perfect');
+      if (a.batRuns >= 6) {
+        this.hitStopTimer = 0.07;
+        this.cameraShake = 0.48;
+        this.crowdExcitement = 1.0;
+        cricketAudio.playCrowdCheer(1.8);
+        cricketAudio.playFireworkBurst();
+        this.showCallout('NO BALL + SIX! 🔥', '#fbbf24', 'rgba(245,158,11,0.32)');
+        const fireworkPalette = [0xfbbf24, 0x38bdf8, 0xf43f5e, 0x10b981, 0xa855f7, 0xffffff];
+        [[-22, 12, -32], [22, 14, -32]].forEach(([fx, fy, fz]) => {
+          this.spawnParticles({ x: fx, y: fy, z: fz, count: 28, colors: fireworkPalette, speed: 9.5, gravity: 7.5, firework: true });
+        });
+      } else if (a.batRuns >= 4) {
+        this.hitStopTimer = 0.05;
+        this.cameraShake = 0.28;
+        this.crowdExcitement = 0.85;
+        cricketAudio.playCrowdCheer(1.35);
+        this.showCallout('NO BALL + FOUR! ⚡', '#34d399', 'rgba(16,185,129,0.24)');
+      } else {
+        this.showCallout('NO BALL • FREE HIT!', '#fbbf24', 'rgba(245,158,11,0.18)');
+      }
+    } else if (a.isFreeHitBowled) {
+      this.dislodgeStumps();
+      this.showCallout('FREE HIT! NOT OUT', '#fbbf24');
     } else if (a.isLeave) {
       this.showCallout('WELL LEFT', '#cbd5e1');
+    } else if (a.isKeeperTake) {
+      this.showCallout('BEATEN! •', '#94a3b8');
     } else {
       cricketAudio.playBatCrack(lb.timing || 'Perfect');
       this.spawnParticles({ x: 0, y: 0.9, z: WORLD.STRIKER_Z - 0.6, count: 10, colors: [0xfde047, 0x38bdf8], speed: 4.5 });
 
-      if (lb.runs === 6) {
+      if (a.batRuns === 6) {
         this.hitStopTimer = 0.07;
         this.cameraShake = 0.48;
         this.crowdExcitement = 1.0;
         cricketAudio.playCrowdCheer(1.8);
         cricketAudio.playFireworkBurst();
         this.showCallout('MAXIMUM SIX! 🔥', '#fbbf24', 'rgba(245,158,11,0.32)');
-        // Stadium fireworks & multi-colored confetti bursts!
         const fireworkPalette = [0xfbbf24, 0x38bdf8, 0xf43f5e, 0x10b981, 0xa855f7, 0xffffff];
         [[-22, 12, -32], [22, 14, -32], [a.endX * 0.55, 10, a.endZ * 0.55]].forEach(([fx, fy, fz]) => {
           this.spawnParticles({ x: fx, y: fy, z: fz, count: 32, colors: fireworkPalette, speed: 9.5, gravity: 7.5, firework: true });
         });
-      } else if (lb.runs === 4) {
+      } else if (a.batRuns === 4) {
         this.hitStopTimer = 0.05;
         this.cameraShake = 0.28;
         this.crowdExcitement = 0.85;
         cricketAudio.playCrowdCheer(1.35);
         this.showCallout('FOUR! ⚡', '#34d399', 'rgba(16,185,129,0.24)');
-      } else if (lb.runs > 0) {
-        this.showCallout(`${lb.runs} RUN${lb.runs > 1 ? 'S' : ''}!`, '#38bdf8');
+      } else if (a.batRuns > 0) {
+        this.showCallout(`${a.batRuns} RUN${a.batRuns > 1 ? 'S' : ''}!`, '#38bdf8');
       } else {
-        this.showCallout(lb.timing === 'Perfect' ? 'SOLID! •' : 'DOT BALL', '#e2e8f0');
+        this.showCallout(a.outcomeMode === 'block' ? 'SOLID BLOCK •' : 'FIELDED! •', '#e2e8f0');
       }
     }
   }

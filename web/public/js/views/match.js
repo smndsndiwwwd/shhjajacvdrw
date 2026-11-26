@@ -127,9 +127,21 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     let cls = '';
     let icon = String(lb.runs);
     let label = `${lb.runs} Run${lb.runs === 1 ? '' : 's'}`;
-    if (lb.wicket) { cls = 'is-wicket'; icon = 'W'; label = 'WICKET!'; }
-    else if (lb.rebowl) { icon = 'WD'; label = 'WIDE (+1)'; }
-    else if (lb.runs === 6) { cls = 'is-six'; icon = '6!'; label = 'MAXIMUM SIX!'; }
+    if (lb.wicket) {
+      cls = 'is-wicket';
+      icon = 'W';
+      const dt = String(lb.dismissalType || '').toUpperCase();
+      label = dt && dt !== 'NOT OUT' ? `WICKET (${dt})!` : 'WICKET!';
+    } else if (lb.extraType === 'no_ball') {
+      icon = 'NB';
+      const batRuns = Math.max(0, (lb.runs || 0) - 1);
+      if (batRuns >= 6) { cls = 'is-six'; label = 'NO BALL + SIX! 🔥'; }
+      else if (batRuns >= 4) { cls = 'is-four'; label = 'NO BALL + FOUR! ⚡'; }
+      else label = `NO BALL (+${lb.runs || 1}) • FREE HIT!`;
+    } else if (lb.rebowl) {
+      icon = 'WD';
+      label = 'WIDE (+1)';
+    } else if (lb.runs === 6) { cls = 'is-six'; icon = '6!'; label = 'MAXIMUM SIX!'; }
     else if (lb.runs === 4) { cls = 'is-four'; icon = '4!'; label = 'CRACKING FOUR!'; }
     else if (lb.runs === 0) { icon = '•'; label = 'DOT BALL'; }
 
@@ -187,6 +199,15 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       ? `TARGET ${match.batting.targetRuns}`
       : `DEFEND ${Math.max(0, (match.bowling.targetRuns || 1) - 1)}`;
 
+    const modeBadges = {
+      chapter: 'CHAPTER',
+      practice: 'PRACTICE',
+      quick: 'QUICK MATCH',
+      tournament: 'TOURNAMENT',
+      franchise: 'FRANCHISE'
+    };
+    const modeLabel = modeBadges[match.mode] || '3D LIVE';
+
     renderer.updateConfig({
       phase: match.phase,
       pitch: match.pitch,
@@ -199,7 +220,7 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
       allowZoneClick: batStep === 'zone',
       currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null,
-      hud: { score: scoreStr, overs: oversStr, target: targetStr }
+      hud: { modeLabel, score: scoreStr, overs: oversStr, target: targetStr }
     });
   };
 

@@ -797,19 +797,33 @@ export async function playWebMatchBall(playerId, action = {}) {
       ? 'Shouldered Arms (Leave)'
       : (equippedShot ? `${equippedShot.num} ${equippedShot.name}` : getDerivedShotName(footwork, intent, zone));
 
-    const entry = `${deliv.length} on ${deliv.line} (${deliv.speed} ${deliv.variation}) ➔ ${shotName} [${simResult.timing}] — ${simResult.commentary}${overMsg}`;
+    const effectiveDeliv = simResult.actualLine && simResult.actualLine !== deliv.line
+      ? { ...deliv, line: simResult.actualLine }
+      : deliv;
+    const entry = `${effectiveDeliv.length} on ${effectiveDeliv.line} (${effectiveDeliv.speed} ${effectiveDeliv.variation}) ➔ ${shotName} [${simResult.timing}] — ${simResult.commentary}${overMsg}`;
     match.commentaryLog.unshift(entry);
     match.ballHistory = match.ballHistory || [];
-    match.ballHistory.push(simResult.wicket ? 'W' : simResult.rebowl ? 'WD' : String(simResult.runs));
+    match.ballHistory.push(
+      simResult.wicket ? 'W' :
+      simResult.extraType === 'no_ball' ? 'NB' :
+      simResult.rebowl ? 'WD' :
+      String(simResult.runs)
+    );
     match.lastBall = {
       runs: simResult.runs,
       wicket: simResult.wicket,
+      dismissalType: simResult.dismissalType || 'not out',
+      dismissalDetail: simResult.dismissalDetail || '',
+      extraType: simResult.extraType || '',
       rebowl: simResult.rebowl,
       freeHitNext: match.bat.freeHit,
       timing: simResult.timing,
       shotName,
+      footwork,
+      intent: isLeave ? 'Leave' : intent,
+      stance,
       actualZone: isLeave ? 'In Line' : (simResult.actualZone || zone),
-      delivery: deliv,
+      delivery: effectiveDeliv,
       commentary: simResult.commentary
     };
 
@@ -920,17 +934,29 @@ export async function playWebMatchBall(playerId, action = {}) {
       match.oppBatterHand = Math.random() < 0.35 ? 'Left-hand bat' : 'Right-hand bat';
     }
 
-    const entry = `You bowled ${length} on ${line} (${speed} ${variation}) ➔ Opp played ${aiShot} to ${aiZone} [${timingResult}] — ${simResult.commentary}`;
+    const effectiveBowlDeliv = { line: simResult.actualLine || line, length, variation, speed };
+    const entry = `You bowled ${effectiveBowlDeliv.length} on ${effectiveBowlDeliv.line} (${speed} ${variation}) ➔ Opp played ${aiShot} to ${simResult.actualZone || aiZone} [${timingResult}] — ${simResult.commentary}`;
     match.commentaryLog.unshift(entry);
     match.ballHistory = match.ballHistory || [];
-    match.ballHistory.push(simResult.wicket ? 'W' : simResult.rebowl ? 'WD' : String(simResult.runs));
+    match.ballHistory.push(
+      simResult.wicket ? 'W' :
+      simResult.extraType === 'no_ball' ? 'NB' :
+      simResult.rebowl ? 'WD' :
+      String(simResult.runs)
+    );
     match.lastBall = {
       runs: simResult.runs,
       wicket: simResult.wicket,
+      dismissalType: simResult.dismissalType || 'not out',
+      dismissalDetail: simResult.dismissalDetail || '',
+      extraType: simResult.extraType || '',
       rebowl: simResult.rebowl,
       timing: timingResult,
       shotName: aiShot,
-      delivery: { line, length, variation, speed },
+      footwork: 'Front Foot',
+      intent: aiIntent === 'Defensive' ? 'Push' : aiIntent === 'Aggressive' ? 'Loft' : 'Stroke',
+      actualZone: simResult.actualZone || aiZone,
+      delivery: effectiveBowlDeliv,
       commentary: simResult.commentary
     };
 

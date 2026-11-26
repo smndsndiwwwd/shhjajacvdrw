@@ -675,7 +675,8 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   color: #ffe4e6;
   box-shadow: 0 0 14px rgba(244, 63, 94, 0.45);
 }
-.ball-pill.ball-WD {
+.ball-pill.ball-WD,
+.ball-pill.ball-NB {
   background: rgba(168, 85, 247, 0.22);
   border-color: var(--purple);
   color: #f3e8ff;

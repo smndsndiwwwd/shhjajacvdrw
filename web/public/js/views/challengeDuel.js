@@ -93,8 +93,18 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
     let cls = '';
     let icon = String(lb.runs);
     let label = `${lb.runs} Run${lb.runs === 1 ? '' : 's'}`;
-    if (lb.wicket) { cls = 'is-wicket'; icon = 'W'; label = 'WICKET!'; }
-    else if (lb.rebowl) { icon = 'WD'; label = 'WIDE (+1)'; }
+    if (lb.wicket) {
+      cls = 'is-wicket';
+      icon = 'W';
+      const dt = String(lb.dismissalType || '').toUpperCase();
+      label = dt && dt !== 'NOT OUT' ? `WICKET (${dt})!` : 'WICKET!';
+    } else if (lb.extraType === 'no_ball') {
+      icon = 'NB';
+      const batRuns = Math.max(0, (lb.runs || 0) - 1);
+      if (batRuns >= 6) { cls = 'is-six'; label = 'NO BALL + SIX! 🔥'; }
+      else if (batRuns >= 4) { cls = 'is-four'; label = 'NO BALL + FOUR! ⚡'; }
+      else label = `NO BALL (+${lb.runs || 1}) • FREE HIT!`;
+    } else if (lb.rebowl) { icon = 'WD'; label = 'WIDE (+1)'; }
     else if (lb.runs === 6) { cls = 'is-six'; icon = '6!'; label = 'MAXIMUM SIX!'; }
     else if (lb.runs === 4) { cls = 'is-four'; icon = '4!'; label = 'CRACKING FOUR!'; }
     else if (lb.runs === 0) { icon = '•'; label = 'DOT BALL'; }
@@ -154,6 +164,7 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
       allowZoneClick: isBatter && batStep === 'zone',
       currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null,
       hud: {
+        modeLabel: 'PVP DUEL',
         score: `${st.runs || 0}/${st.wickets || 0}`,
         overs: `${Math.floor((st.balls || 0) / 6)}.${(st.balls || 0) % 6}/${st.overs || 1} ov`,
         target: `TARGET ${st.targetRuns || 15}`

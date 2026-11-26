@@ -942,12 +942,16 @@ export function simulateBallAdvanced({
   let runs = 0;
   let wicket = false;
   let dismissalType = 'not out';
+  let dismissalDetail = '';
+  let extraType = '';
   let commentary = '';
   let outcomeType = 'Dot';
   let nextIsFreeHit = false;
   let rebowl = false;
 
   const { line, length, variation, speed, fieldPreset } = bowlerInput;
+  const isSpinDelivery = String(speed || '').toLowerCase() === 'slow' ||
+    ['off-break', 'leg-break', 'googly', 'doosra', 'carrom', 'flipper', 'arm ball', 'top-spinner'].some(k => String(variation || '').toLowerCase().includes(k));
   const { targetZone, intent, shotType, stanceCommitment, stance, footwork, zone } = batterInput;
 
   // Resolve new and legacy parameters
@@ -977,38 +981,52 @@ export function simulateBallAdvanced({
     const isFrontFoot = footwork === 'Front Foot' || (!footwork && effectiveFootwork === 'Leave');
     const isBackFoot = footwork === 'Back Foot';
     const isAdvanced = footwork === 'Advanced';
+    let leaveActualLine = line;
 
     if (line === 'Stumps' && actualLength !== 'Short') {
       if (!isFreeHit) {
         wicket = true;
-        dismissalType = (actualLength === 'Yorker' || actualLength === 'Full') ? 'bowled' : (Math.random() < 0.5 ? 'bowled' : 'lbw');
-        if (isAdvanced) {
+        if (isAdvanced && isSpinDelivery) {
           dismissalType = 'stumped';
-          commentary = `💔 STUMPED! Charged out on the front foot and left the delivery! The keeper whips off the bails in a flash! Out!`;
-        } else if (dismissalType === 'bowled') {
-          if (equippedShot) {
-            commentary = `💔 BOWLED! Attempted a **${equippedShot.name}**, but misjudged the line as the ball crashed into off-stump! Clean bowled!`;
-          } else {
-            commentary = isBackFoot
-              ? `💔 BOWLED! Left alone on the back foot, but the delivery crashed directly into off-stump! Clean bowled!`
-              : `💔 BOWLED! Shouldered arms on the front foot to a ball directed straight at the stumps! Clean bowled!`;
-          }
+          dismissalDetail = 'stumped';
+          commentary = `💔 STUMPED! Stepped down the pitch to the spinner and left the delivery! The keeper whips off the bails in a flash! Out!`;
         } else {
-          commentary = `💔 LBW! Left the ball on a good length, struck plumb in front of middle stump! Out!`;
+          dismissalType = (actualLength === 'Yorker' || actualLength === 'Full') ? 'bowled' : (Math.random() < 0.55 ? 'bowled' : 'lbw');
+          dismissalDetail = dismissalType;
+          if (dismissalType === 'bowled') {
+            if (isAdvanced) {
+              commentary = `💔 BOWLED! Charged down to the ${String(speed || 'pace').toLowerCase()} bowler and left it straight on middle stump — clean bowled!`;
+            } else if (equippedShot) {
+              commentary = `💔 BOWLED! Attempted a **${equippedShot.name}**, but misjudged the line as the ball crashed into off-stump! Clean bowled!`;
+            } else {
+              commentary = isBackFoot
+                ? `💔 BOWLED! Left alone on the back foot, but the delivery crashed directly into off-stump! Clean bowled!`
+                : `💔 BOWLED! Shouldered arms on the front foot to a ball directed straight at the stumps! Clean bowled!`;
+            }
+          } else {
+            commentary = isAdvanced
+              ? `💔 LBW! Stepped out to pace and left a straight one on the pads in front of middle stump! Out!`
+              : `💔 LBW! Left the ball on a good length, struck plumb in front of middle stump! Out!`;
+          }
         }
         outcomeType = 'Out';
       } else {
         runs = 0;
+        dismissalDetail = 'free_hit_bowled';
         commentary = `⚠️ Left alone on the stumps on a FREE HIT! The bails fly off but you are NOT OUT! Dot ball.`;
         outcomeType = 'Dot';
       }
     } else if (line === 'Wide') {
       runs = 1;
       rebowl = true;
-      commentary = `🧘 Masterclass leave! The ball lands well outside the tramlines. WIDE called by the umpire! +1 Run.`;
-      outcomeType = 'Run';
+      extraType = 'wide';
+      dismissalDetail = 'keeper';
+      leaveActualLine = 'Wide';
+      commentary = `🧘 Masterclass leave! The ball lands well outside the tramlines into the keeper's gloves. WIDE called by the umpire! +1 Run.`;
+      outcomeType = 'Extra';
     } else if (actualLength === 'Short') {
       runs = 0;
+      dismissalDetail = 'keeper';
       if (equippedShot) {
         commentary = `🧘 **${equippedShot.name}:** ${equippedShot.desc} Safely through to the keeper. Dot ball.`;
       } else if (isBackFoot) {
@@ -1019,14 +1037,15 @@ export function simulateBallAdvanced({
       outcomeType = 'Dot';
     } else {
       runs = 0;
+      dismissalDetail = 'keeper';
       if (equippedShot) {
-        commentary = `🧘 **${equippedShot.name}:** ${equippedShot.desc} Dot ball.`;
+        commentary = `🧘 **${equippedShot.name}:** ${equippedShot.desc} Safely through to the keeper. Dot ball.`;
       } else if (isBackFoot) {
         commentary = `🧘 Back Foot Leave! Stepped deep into the crease, gave the delivery a wide berth and watched it sail into the keeper's gloves. Dot ball.`;
       } else if (isAdvanced) {
-        commentary = `🧘 Advanced Leave! Stepped out of the crease, read the spin drift, and padded/left the ball safely away from the stumps. Dot ball.`;
+        commentary = `🧘 Advanced Leave! Stepped out and watched the delivery pass safely outside the stumps into the keeper's gloves. Dot ball.`;
       } else {
-        commentary = `🧘 Front Foot Leave! High front elbow, bending onto the knee, shouldered arms cleanly outside off-stump. Ball through to the keeper. Dot ball.`;
+        commentary = `🧘 Front Foot Leave! High front elbow, shouldered arms cleanly outside off-stump. Ball carries safely to the keeper. Dot ball.`;
       }
       outcomeType = 'Dot';
     }
@@ -1035,6 +1054,10 @@ export function simulateBallAdvanced({
       runs,
       wicket,
       dismissalType,
+      dismissalDetail,
+      extraType,
+      actualLine: leaveActualLine,
+      actualZone: 'In Line',
       commentary,
       timing: 'Left Alone',
       matchupStar: 3,
@@ -1121,6 +1144,7 @@ export function simulateBallAdvanced({
 
   // Handle Severe Technical Mismatches (e.g. Back Foot Pull to Slow Full ball outside off)
   if (isSevereMismatch) {
+    let mismatchZone = effectiveZone;
     matchupStar = 1.0;
     if (adjustedTiming === 'Perfect') {
       adjustedTiming = isDeceivedByPace ? 'Very Early' : (Math.random() < 0.6 ? 'Very Early' : 'Slightly Early');
@@ -1131,7 +1155,8 @@ export function simulateBallAdvanced({
     if (adjustedTiming.includes('Very')) {
       if (isFreeHit) {
         runs = 0;
-        commentary = `💨 Horrible technical mismatch! Reached across the line blindly, but saved by the FREE HIT! Dot ball.`;
+        dismissalDetail = 'keeper';
+        commentary = `💨 Horrible technical mismatch! Swung wildly and missed, saved by the FREE HIT! Dot ball.`;
         outcomeType = 'Dot';
       } else {
         const outRoll = Math.random() * 100;
@@ -1141,34 +1166,43 @@ export function simulateBallAdvanced({
           if (isPullOnFullOrYorker && isCrossLineDrag) {
             if (roll < 65) {
               dismissalType = 'caught';
+              dismissalDetail = 'ring';
+              mismatchZone = 'Cover';
               commentary = `💔 CAUGHT! Atrocious shot selection! Reached out on the back foot to pull a ${speed.toLowerCase()} delivery full outside off. Skied a helpless top edge caught easily in the covers!`;
             } else {
               dismissalType = 'bowled';
+              dismissalDetail = 'bowled';
               commentary = `💔 BOWLED! Attempted to pull a full delivery from outside off from deep in the crease! Thick bottom edge chops right onto off-stump!`;
             }
           } else if (isFrontFootToShort) {
             dismissalType = 'caught';
+            dismissalDetail = 'ring';
+            mismatchZone = 'Long On';
             commentary = `💔 CAUGHT! Blindly pushed on the front foot to a sharp bouncer! Ball ballooned off the shoulder of the bat straight to mid-on!`;
           } else if (isCreaseLoftToYorker) {
             dismissalType = 'bowled';
+            dismissalDetail = 'bowled';
             commentary = `💔 BOWLED! Tried to loft a spearing Yorker from deep inside the crease! Beaten between bat and pad as the bails fly!`;
           } else if (actualLength === 'Yorker' || actualLength === 'Full') {
             dismissalType = 'bowled';
+            dismissalDetail = 'bowled';
             commentary = `💔 BOWLED! Stuck on the back foot against a full delivery, missed the line completely! Clean bowled!`;
           } else {
             dismissalType = 'caught';
-            commentary = `💔 CAUGHT! Egregious footwork mismatch results in a wretched skier, taken comfortably!`;
+            dismissalDetail = 'ring';
+            commentary = `💔 CAUGHT! Egregious footwork mismatch results in a wretched skier, taken comfortably in the ring!`;
           }
           outcomeType = 'Out';
         } else {
           runs = 0;
+          dismissalDetail = 'keeper';
           outcomeType = 'Dot';
           if (isPullOnFullOrYorker) {
-            commentary = `💨 Beaten by flight & lack of pace! Stepped back to pull, but the delivery was too full and slow outside off. Swung through way too early and missed it completely! Dot ball.`;
+            commentary = `💨 Beaten by flight & lack of pace! Stepped back to pull, but the delivery was too full and slow outside off. Swung through early and missed into the keeper's gloves! Dot ball.`;
           } else if (isFrontFootToShort) {
             commentary = `💨 Beaten by steep bounce! Stood tall on the front foot to drive a bouncer, but the ball whistled past helmet into keeper's gloves. Dot ball.`;
           } else {
-            commentary = `💨 Completely deceived by the delivery! Swung wildly across the line and missed it by a mile. Dot ball.`;
+            commentary = `💨 Completely deceived by the delivery! Swung wildly across the line and missed cleanly to the keeper. Dot ball.`;
           }
         }
       }
@@ -1176,6 +1210,10 @@ export function simulateBallAdvanced({
         runs,
         wicket,
         dismissalType,
+        dismissalDetail,
+        extraType,
+        actualLine: line,
+        actualZone: mismatchZone,
         commentary,
         timing: adjustedTiming,
         matchupStar,
@@ -1189,9 +1227,11 @@ export function simulateBallAdvanced({
       if (!isFreeHit && catchRoll < 45) {
         wicket = true;
         dismissalType = 'caught';
+        dismissalDetail = 'ring';
         if (isPullOnFullOrYorker) {
           commentary = `💔 CAUGHT! Sliced off the toe-end! Reached across to pull a slow, full ball from the back foot and looped a soft catch to the infielder!`;
         } else if (isFrontFootToShort) {
+          mismatchZone = 'Mid Wicket';
           commentary = `💔 CAUGHT! Pushed on the front foot to a bouncer, looped off the splice to short mid-wicket!`;
         } else {
           commentary = `💔 CAUGHT! Completely deceived by line and length, giving a simple catch to the infield!`;
@@ -1201,16 +1241,20 @@ export function simulateBallAdvanced({
         runs = 0;
         outcomeType = 'Dot';
         if (isPullOnFullOrYorker) {
-          commentary = `⚠️ Bottom-edged into the pitch! Attempted a back-foot pull against a full delivery outside off. Bounces into the turf, no run.`;
+          dismissalDetail = 'block';
+          commentary = `⚠️ Bottom-edged into the pitch! Attempted a back-foot pull against a full delivery outside off. Drops dead into the turf, no run.`;
         } else if (isFrontFootToShort) {
+          dismissalDetail = 'keeper';
           commentary = `💨 Beaten by steep bounce! Tried to drive a bouncer on the front foot; whistled past helmet into keeper's gloves. Dot ball.`;
         } else {
-          commentary = `💨 Completely beaten by the movement and lack of pace. Swung through awkwardly, dot ball.`;
+          dismissalDetail = 'keeper';
+          commentary = `💨 Completely beaten by the movement and pace. Swung through awkwardly into the keeper's gloves, dot ball.`;
         }
       } else {
         runs = 1;
         outcomeType = 'Run';
         if (isPullOnFullOrYorker) {
+          mismatchZone = 'Third Man';
           commentary = `🏃 Thick edge squirts away! Completely mistimed the back-foot pull against the slow full ball; trickles past slip for a scramble single.`;
         } else {
           commentary = `🏃 Awkwardly squirted off the toe-end into the gap for a single.`;
@@ -1220,6 +1264,10 @@ export function simulateBallAdvanced({
         runs,
         wicket,
         dismissalType,
+        dismissalDetail,
+        extraType,
+        actualLine: line,
+        actualZone: mismatchZone,
         commentary,
         timing: adjustedTiming,
         matchupStar,
@@ -1363,32 +1411,46 @@ export function simulateBallAdvanced({
     // MISS
     if (isFreeHit) {
       runs = 0;
-      commentary = `💨 Completely beaten! Stumps hit but it's a FREE HIT, so you're safe! Dot ball.`;
+      if (line === 'Stumps' && actualLength !== 'Short') {
+        dismissalDetail = 'free_hit_bowled';
+        commentary = `💨 Completely beaten! Stumps hit on a FREE HIT — bails fly, but you're safe! Dot ball.`;
+      } else {
+        dismissalDetail = 'keeper';
+        commentary = `💨 Swung and missed cleanly on a FREE HIT! Through to the keeper. Dot ball.`;
+      }
       outcomeType = 'Dot';
     } else {
       wicket = true;
       const roll = Math.random() * 100;
-      if (effectiveFootwork === 'Advanced' && roll < 70) {
+      if (effectiveFootwork === 'Advanced' && isSpinDelivery && roll < 70) {
         dismissalType = 'stumped';
-        commentary = `💔 STUMPED! Charged down the track and swung wildly, completely missing the ball! The keeper whips off the bails in a flash!`;
-      } else if (actualLength === 'Yorker' || actualLength === 'Full' || actualLength === 'Full Toss') {
-        if (roll < 60) {
+        dismissalDetail = 'stumped';
+        commentary = `💔 STUMPED! Charged down the track to the spinner and swung wildly, missing the flight completely! The keeper whips off the bails in a flash!`;
+      } else if (actualLength === 'Yorker' || actualLength === 'Full' || actualLength === 'Full Toss' || (effectiveFootwork === 'Advanced' && line === 'Stumps')) {
+        if (roll < 62) {
           dismissalType = 'bowled';
-          commentary = `💔 BOWLED! Yorker spears right under your bat. Stumps shattered!`;
+          dismissalDetail = 'bowled';
+          commentary = effectiveFootwork === 'Advanced'
+            ? `💔 BOWLED! Charged out to the ${String(speed || 'pace').toLowerCase()} delivery and missed — ball crashes straight into timber!`
+            : `💔 BOWLED! Full delivery spears right under your bat. Stumps shattered!`;
         } else {
           dismissalType = 'lbw';
-          commentary = `💔 LBW! Struck right on the pads in front of middle stump. Out!`;
+          dismissalDetail = 'lbw';
+          commentary = `💔 LBW! Beaten for pace and struck plumb on the pads in front of middle stump. Out!`;
         }
       } else if (actualLength === 'Short') {
         dismissalType = 'caught';
-        commentary = `💔 CAUGHT! A hurried pull shot results in a top edge falling straight into the keeper's gloves.`;
+        dismissalDetail = 'keeper';
+        commentary = `💔 CAUGHT BEHIND! A hurried pull shot gets a top edge straight into the keeper's gloves!`;
       } else {
         if (roll < 50) {
           dismissalType = 'bowled';
-          commentary = `💔 BOWLED! Beaten by the bounce, the ball clips the top of off-stump!`;
+          dismissalDetail = 'bowled';
+          commentary = `💔 BOWLED! Beaten by the seam & bounce, the ball clips the top of off-stump!`;
         } else {
           dismissalType = 'caught';
-          commentary = `💔 CAUGHT BEHIND! Outside edge into the wicket-keeper's hands!`;
+          dismissalDetail = 'keeper';
+          commentary = `💔 CAUGHT BEHIND! Outside edge straight into the wicket-keeper's gloves!`;
         }
       }
       outcomeType = 'Out';
@@ -1404,7 +1466,8 @@ export function simulateBallAdvanced({
 
     if (effectiveIntent === 'Push' || intent === 'Defensive' || intent === 'Defensive Shot') {
       runs = 0;
-      commentary = `🛡️ Played defensively with slightly off-timing. Safely blocked. Dot ball.`;
+      dismissalDetail = 'block';
+      commentary = `🛡️ Played defensively with slightly off-timing. Drops softly at your feet. Dot ball.`;
       outcomeType = 'Dot';
     } else {
       const isLofted = effectiveIntent === 'Loft' ||
@@ -1424,11 +1487,13 @@ export function simulateBallAdvanced({
           if (catchRoll < (52 + bowlerDangerMod) && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
+            dismissalDetail = 'deep';
             const catcher = zoneFielding.labels[0] || 'fielder';
             commentary = `💔 CAUGHT! Mistimed aerial shot picked out ${catcher} waiting in Zone ${finalZone} (${zName})!`;
             outcomeType = 'Out';
           } else {
             runs = Math.random() < 0.55 ? 1 : 0;
+            dismissalDetail = runs === 0 ? 'ring' : '';
             commentary = runs === 1
               ? `🏏 Mistimed loft drops just out of ${zoneFielding.labels[0] || 'fielder'}'s reach in Zone ${finalZone} (${zName}) for a single.`
               : `💥 Swatted straight to the fielder in Zone ${finalZone} (${zName}) on the bounce. Dot ball.`;
@@ -1438,6 +1503,7 @@ export function simulateBallAdvanced({
           if (catchRoll < (46 + bowlerDangerMod) && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
+            dismissalDetail = 'ring';
             const catcher = zoneFielding.labels.filter(l => !l.startsWith('Deep') && !l.startsWith('Long')).join(' / ') || 'infielder';
             commentary = `💔 CAUGHT! Mistimed in the air. Taken comfortably by ${catcher} inside the circle in Zone ${finalZone} (${zName})!`;
             outcomeType = 'Out';
@@ -1450,6 +1516,7 @@ export function simulateBallAdvanced({
           if (catchRoll < (44 + bowlerDangerMod) && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
+            dismissalDetail = 'deep';
             const catcher = zoneFielding.labels.find(l => l.startsWith('Deep') || l.startsWith('Long')) || 'deep fielder';
             commentary = `💔 CAUGHT! Sliced high into the deep. ${catcher} settles under it and takes the catch in Zone ${finalZone} (${zName})!`;
             outcomeType = 'Out';
@@ -1459,7 +1526,6 @@ export function simulateBallAdvanced({
             outcomeType = 'Run';
           }
         } else {
-          // Vacant Zone!
           if (!directionMismatchOccurred && matchupStar >= 3.0 && (powerVal + eqPower * 0.5) >= 55 && Math.random() < 0.65) {
             runs = 4;
             commentary = `🔥 FOUR! Mistimed slightly, but with Zone ${finalZone} (${zName}) completely vacant, it still trickles to the rope!`;
@@ -1474,6 +1540,7 @@ export function simulateBallAdvanced({
         // Ground shot with Slightly off timing
         if (zoneFielding.infield > 0 && zoneFielding.outfield > 0) {
           runs = (matchupStar >= 3.5 && Math.random() < 0.35) ? 1 : 0;
+          dismissalDetail = runs === 0 ? 'ring' : '';
           commentary = runs === 1
             ? `🏃 Deflected past the infielder, deep fielder cuts it off in Zone ${finalZone} (${zName}) for 1.`
             : `💥 Hit straight to ${zoneFielding.labels[0] || 'the fielder'} guarding Zone ${finalZone} (${zName}). Dot ball.`;
@@ -1485,6 +1552,7 @@ export function simulateBallAdvanced({
             outcomeType = 'Run';
           } else {
             runs = 0;
+            dismissalDetail = 'ring';
             commentary = `💥 Hit on the bounce straight to ${zoneFielding.labels[0] || 'the fielder'} in Zone ${finalZone} (${zName}), stopped cleanly. Dot ball.`;
             outcomeType = 'Dot';
           }
@@ -1493,7 +1561,6 @@ export function simulateBallAdvanced({
           commentary = `🏏 Driven through the vacant ring to ${zoneFielding.labels[0] || 'the deep fielder'} in Zone ${finalZone} (${zName}) for ${runs}.`;
           outcomeType = 'Run';
         } else {
-          // Completely vacant
           if (!directionMismatchOccurred && matchupStar >= 3.0 && powerVal >= 50 && Math.random() < 0.65) {
             runs = 4;
             commentary = `🔥 FOUR! Placed through the completely vacant Zone ${finalZone} (${zName}) along the turf for a boundary!`;
@@ -1524,9 +1591,10 @@ export function simulateBallAdvanced({
     if (effectiveIntent === 'Push' || intent === 'Defensive' || intent === 'Defensive Shot') {
       if (zoneFielding.infield > 0) {
         runs = Math.random() < 0.32 ? 1 : 0;
+        dismissalDetail = runs === 0 ? 'block' : '';
         commentary = runs === 1
           ? `🛡️ Soft hands defense. Guided into the gap beside ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}) for a sharp single!`
-          : `🛡️ Rock-solid defense straight to ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Dot ball.`;
+          : `🛡️ Rock-solid defense drops softly near your feet, fielded by ${zoneFielding.labels[0]} in Zone ${finalZone} (${zName}). Dot ball.`;
         outcomeType = runs === 1 ? 'Run' : 'Dot';
       } else {
         runs = 1;
@@ -1569,6 +1637,7 @@ export function simulateBallAdvanced({
           } else if (Math.random() < 0.38 && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
+            dismissalDetail = 'ring';
             commentary = `💔 CAUGHT! Didn't quite get elevation over ${ringFielderName} in Zone ${finalZone} (${zName}) — sharp ring catch!`;
             outcomeType = 'Out';
           } else {
@@ -1577,7 +1646,6 @@ export function simulateBallAdvanced({
             outcomeType = 'Run';
           }
         } else {
-          // Deep fielder stationed on the rope in Zone! High catch / cut-off risk!
           const roll = Math.random() * 100;
           const sixCap = (!isModerateMismatch && clearEdge >= 42 && effectivePower >= 82)
             ? Math.min(28, 12 + Math.max(0, (clearEdge - 42) * 0.4))
@@ -1588,6 +1656,7 @@ export function simulateBallAdvanced({
           if (roll < catchCap && !isFreeHit) {
             wicket = true;
             dismissalType = 'caught';
+            dismissalDetail = 'deep';
             commentary = `💔 CAUGHT IN THE DEEP! Aimed straight at ${deepFielderName} patrolling Zone ${finalZone} (${zName}) — takes a clean boundary catch!`;
             outcomeType = 'Out';
           } else if (roll < catchCap + sixCap) {
@@ -1605,7 +1674,6 @@ export function simulateBallAdvanced({
           }
         }
       } else {
-        // Ground stroke with stationed fielders
         const roll = Math.random() * 100;
         if (zoneFielding.total === 0) {
           if (Math.random() < 0.85) {
@@ -1637,6 +1705,7 @@ export function simulateBallAdvanced({
             outcomeType = 'Four';
           } else if (roll < fourChance + dotChance) {
             runs = 0;
+            dismissalDetail = 'ring';
             commentary = `💥 Stroked cleanly, but straight into ${ringFielderName} inside the ring in Zone ${finalZone} (${zName}). Dot ball.`;
             outcomeType = 'Dot';
           } else {
@@ -1645,7 +1714,6 @@ export function simulateBallAdvanced({
             outcomeType = 'Run';
           }
         } else {
-          // DOUBLE-GUARDED Zone (both ring + deep fielder stationed there)! Boundary must be rare!
           const fourChance = (!isModerateMismatch && clearEdge >= 30) ? Math.min(18, 6 + (clearEdge - 30) * 0.28) : 5;
           const dotChance = Math.max(18, Math.min(35, 28 - (clearEdge * 0.2)));
           if (roll < fourChance) {
@@ -1654,6 +1722,7 @@ export function simulateBallAdvanced({
             outcomeType = 'Four';
           } else if (roll < fourChance + dotChance) {
             runs = 0;
+            dismissalDetail = 'ring';
             commentary = `💥 Fired straight at ${ringFielderName} in tightly packed Zone ${finalZone} (${zName}) — no run!`;
             outcomeType = 'Dot';
           } else {
@@ -1667,37 +1736,46 @@ export function simulateBallAdvanced({
   }
 
   // 4. Random Extra Check (No ball or Wide - 4% chance total)
+  let actualLine = line;
   let extraRuns = 0;
   if (Math.random() < 0.04 && !isFreeHit) {
     const extraRoll = Math.random();
     if (extraRoll < 0.5) {
+      extraType = 'wide';
+      actualLine = 'Wide';
       extraRuns = 1;
       rebowl = true;
-      commentary = `🚨 WIDE! Spraying way outside the tramline. +1 extra. Ball must be rebowled.`;
       runs = 0;
       wicket = false;
+      dismissalType = 'not out';
+      dismissalDetail = 'keeper';
+      directionMismatchOccurred = false;
+      directionMismatchNote = '';
+      commentary = `🚨 WIDE! Spraying way outside the tramline into the keeper's gloves. +1 extra. Ball must be rebowled.`;
       outcomeType = 'Extra';
     } else {
+      extraType = 'no_ball';
       extraRuns = 1;
       nextIsFreeHit = true;
       rebowl = true;
-      runs = runs + (wicket ? 0 : 0);
       if (wicket) {
         wicket = false;
-        commentary = `🚨 NO BALL! The bowler overstepped! You are NOT OUT! +1 run and FREE HIT coming up!`;
+        dismissalDetail = (dismissalType === 'bowled' || dismissalType === 'stumped') ? 'free_hit_bowled' : 'missed';
+        dismissalType = 'not out';
+        commentary = `🚨 NO BALL! The bowler overstepped! Stumps/dismissal doesn't count — NOT OUT! +1 run and FREE HIT coming up!`;
       } else {
-        commentary = `🚨 NO BALL! Overstepped line. +1 run added. Free Hit unlocked for the next ball!\n${commentary}`;
+        commentary = `🚨 NO BALL! Overstepped crease line (+1 extra + FREE HIT next)! ${commentary}`;
       }
       outcomeType = 'Extra';
     }
   }
 
   let finalCommentary = '';
-  if (pitchModifierText) finalCommentary += pitchModifierText;
-  if (bowlerMissText) finalCommentary += bowlerMissText;
-  if (stancePenaltyText) finalCommentary += `⚠️ ${stancePenaltyText}`;
-  if (directionMismatchNote) finalCommentary += directionMismatchNote;
-  if (equippedShot && effectiveFootwork !== 'Leave' && outcomeType !== 'Extra') {
+  if (pitchModifierText && extraType !== 'wide') finalCommentary += pitchModifierText;
+  if (bowlerMissText && extraType !== 'wide') finalCommentary += bowlerMissText;
+  if (stancePenaltyText && extraType !== 'wide') finalCommentary += `⚠️ ${stancePenaltyText}`;
+  if (directionMismatchNote && extraType !== 'wide') finalCommentary += directionMismatchNote;
+  if (equippedShot && effectiveFootwork !== 'Leave' && extraType !== 'wide') {
     finalCommentary += `🏏 **[${equippedShot.num} ${equippedShot.name}]** ${commentary}`;
   } else {
     finalCommentary += commentary;
@@ -1707,6 +1785,9 @@ export function simulateBallAdvanced({
     runs: runs + extraRuns,
     wicket,
     dismissalType,
+    dismissalDetail,
+    extraType,
+    actualLine,
     timing: adjustedTiming,
     matchupStar,
     actualZone: ZONE_NAMES[finalZone] || effectiveZone,
