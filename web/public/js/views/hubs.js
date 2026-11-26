@@ -1,4 +1,4 @@
-import { api, esc, toast, openModal, closeModal } from '../api.js';
+import { api, esc, toast, openModal, closeModal, formatLocalTimestamp } from '../api.js';
 import { caIcon } from '../components/icons.js';
 import { renderGearIconSVG, renderTrainingSVG } from '../components/gearSvg.js';
 import { openPlayerProfileModal, openSetProfilePhotoModal } from '../components/profileCard.js';
@@ -574,7 +574,7 @@ export async function renderClubAndStatsView(container, state, refresh, initialT
                 <tbody>
                   ${statsData.history.map(h => `
                     <tr>
-                      <td class="mono" style="font-size:0.75rem;color:var(--text-muted);">${esc(h.date)}</td>
+                      <td class="mono" style="font-size:0.75rem;color:var(--text-muted);">${esc(formatLocalTimestamp(h.date))}</td>
                       <td><span class="badge badge-cyan">${esc(h.match_type)}</span></td>
                       <td><strong>${esc(h.opponent)}</strong></td>
                       <td class="mono">${h.runs} (${h.balls}b) [${h.fours}x4, ${h.sixes}x6]</td>

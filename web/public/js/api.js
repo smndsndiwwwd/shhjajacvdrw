@@ -59,3 +59,55 @@ export function closeModal() {
   const root = document.getElementById('modal-root');
   if (root) root.innerHTML = '';
 }
+
+/**
+ * Parses SQLite UTC timestamps ("YYYY-MM-DD HH:MM:SS"), ISO strings, or epoch ms into a Date object.
+ */
+export function parseServerDate(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'number' && !Number.isNaN(raw)) {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const str = String(raw).trim();
+  if (/^\d+$/.test(str)) {
+    const d = new Date(Number(str));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  // SQLite datetime('now') / CURRENT_TIMESTAMP stores UTC without 'Z' or timezone offset
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(str)
+    ? str.replace(' ', 'T') + 'Z'
+    : str;
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function formatLocalTimestamp(raw, { withSeconds = false } = {}) {
+  const d = parseServerDate(raw);
+  if (!d) return String(raw ?? '');
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {})
+  });
+}
+
+export function formatLocalTimeOnly(raw) {
+  const d = parseServerDate(raw);
+  if (!d) return String(raw ?? '');
+  return d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+export function formatUtcHourToLocal(hourStr = '00:00') {
+  const hr = parseInt(String(hourStr).slice(0, 2), 10);
+  if (Number.isNaN(hr)) return String(hourStr);
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hr, 0, 0));
+  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+}

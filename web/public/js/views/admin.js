@@ -1,4 +1,4 @@
-import { api, esc, toast, openModal } from '../api.js';
+import { api, esc, toast, openModal, formatLocalTimestamp, formatLocalTimeOnly, formatUtcHourToLocal } from '../api.js';
 
 export async function renderAdminView(container, state, refresh) {
   let tab = 'logs'; // 'logs' | 'players' | 'economy' | 'config'
@@ -120,16 +120,19 @@ export async function renderAdminView(container, state, refresh) {
               <div class="grid-3" style="gap:14px;">
                 <div class="card" style="padding:14px;">
                   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <h4 style="font-size:0.92rem;">📈 24-Hour Event Activity (UTC)</h4>
+                    <h4 style="font-size:0.92rem;">📈 24-Hour Event Activity (Local)</h4>
                     <span class="badge badge-muted">Hourly</span>
                   </div>
                   <div class="spark-wrap">
-                    ${hourly.map((h, i) => `
-                      <div class="spark-col" title="${h.hour} UTC: ${h.count} events">
-                        <div class="spark-bar" style="height:${Math.max(5, Math.round((h.count / maxHr) * 100))}%;"></div>
-                        <div class="spark-lbl">${i % 4 === 0 ? h.hour.slice(0, 2) : ''}</div>
-                      </div>
-                    `).join('')}
+                    ${hourly.map((h, i) => {
+                      const localHr = formatUtcHourToLocal(h.hour);
+                      return `
+                        <div class="spark-col" title="${esc(localHr)} Local: ${h.count} events">
+                          <div class="spark-bar" style="height:${Math.max(5, Math.round((h.count / maxHr) * 100))}%;"></div>
+                          <div class="spark-lbl">${i % 4 === 0 ? esc(localHr.slice(0, 2)) : ''}</div>
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
                     ${(ins.categoryBreakdownToday || []).map(c => `<span class="badge badge-muted">${esc(c.category)}: ${c.cnt}</span>`).join('') || '<span style="font-size:0.76rem;color:var(--text-muted);">No events logged today yet.</span>'}
@@ -155,7 +158,7 @@ export async function renderAdminView(container, state, refresh) {
                           <span class="badge ${rl.title === 'Failed Login Attempt' ? 'badge-crimson' : 'badge-emerald'}" style="font-size:0.62rem;">${rl.title === 'Failed Login Attempt' ? 'FAIL' : 'OK'}</span>
                           <strong style="margin-left:4px;">${esc(rl.actor)}</strong>
                         </span>
-                        <span class="mono" style="color:var(--text-muted);">${esc(rl.timestamp.slice(11, 16))} • ${esc(rl.ip || '')}</span>
+                        <span class="mono" style="color:var(--text-muted);">${esc(formatLocalTimeOnly(rl.timestamp))} • ${esc(rl.ip || '')}</span>
                       </div>
                     `).join('') || '<div style="font-size:0.8rem;color:var(--text-muted);">No logins recorded.</div>'}
                   </div>
@@ -188,7 +191,7 @@ export async function renderAdminView(container, state, refresh) {
                           ${ad.target ? ` <span style="color:var(--text-muted);">(${esc(ad.target)})</span>` : ''}
                           ${infoText ? ` <span class="badge badge-muted mono" style="font-size:0.66rem;">${esc(infoText.slice(0, 48))}</span>` : ''}
                         </span>
-                        <span class="mono" style="color:var(--text-muted);font-size:0.72rem;">${esc(ad.timestamp)} ${ad.ip ? `• ${esc(ad.ip)}` : ''}</span>
+                        <span class="mono" style="color:var(--text-muted);font-size:0.72rem;">${esc(formatLocalTimestamp(ad.timestamp))} ${ad.ip ? `• ${esc(ad.ip)}` : ''}</span>
                       </div>
                     `;
                   }).join('') || '<div style="font-size:0.8rem;color:var(--text-muted);">No admin grants or modifications logged yet.</div>'}
@@ -232,7 +235,7 @@ export async function renderAdminView(container, state, refresh) {
             <div class="table-wrap" style="max-height:520px;overflow-y:auto;">
               <table class="data-table">
                 <thead>
-                  <tr><th>ID</th><th>Timestamp (UTC)</th><th>Level</th><th>Category</th><th>Actor</th><th>Target</th><th>Event Title</th><th>Details</th></tr>
+                  <tr><th>ID</th><th>Timestamp (Local)</th><th>Level</th><th>Category</th><th>Actor</th><th>Target</th><th>Event Title</th><th>Details</th></tr>
                 </thead>
                 <tbody>
                   ${logsData.logs.map((row, idx) => {
@@ -246,7 +249,7 @@ export async function renderAdminView(container, state, refresh) {
                     return `
                       <tr>
                         <td class="mono" style="color:var(--text-muted);">#${row.id}</td>
-                        <td class="mono" style="font-size:0.75rem;white-space:nowrap;">${esc(row.timestamp)}</td>
+                        <td class="mono" style="font-size:0.75rem;white-space:nowrap;">${esc(formatLocalTimestamp(row.timestamp, { withSeconds: true }))}</td>
                         <td><span class="badge ${levelBadgeClass(row.level)}">${esc(row.level)}</span></td>
                         <td><span class="badge badge-muted">${esc(row.category)}</span></td>
                         <td class="mono" style="color:var(--cyan);">${esc(row.actor)}</td>
@@ -332,7 +335,7 @@ export async function renderAdminView(container, state, refresh) {
                       <td><span class="badge ${u.role === 'admin' ? 'badge-crimson' : 'badge-cyan'}">${esc(u.role)}</span></td>
                       <td>${u.player_name ? `${esc(u.player_name)} <span class="badge badge-muted mono">${esc(u.public_id || u.player_id)}</span>` : 'No Career'}</td>
                       <td class="mono">${u.level ? `LVL ${u.level} • ${u.coins}c` : '—'}</td>
-                      <td class="mono" style="font-size:0.74rem;">${esc(u.last_login || 'Never')}</td>
+                      <td class="mono" style="font-size:0.74rem;">${esc(u.last_login ? formatLocalTimestamp(u.last_login) : 'Never')}</td>
                       <td style="display:flex;gap:6px;">
                         ${u.id !== state.user.id ? `
                           <button class="btn btn-sm toggle-role-btn" data-id="${u.id}" data-role="${u.role === 'admin' ? 'player' : 'admin'}">
@@ -488,7 +491,7 @@ export async function renderAdminView(container, state, refresh) {
       try { formatted = JSON.stringify(JSON.parse(row.details), null, 2); } catch {}
       openModal(`
         <h3>📜 Log Entry #${row.id}</h3>
-        <div class="mono" style="font-size:0.8rem;color:var(--cyan);margin:8px 0;">${esc(row.timestamp)} • ${esc(row.level)} • ${esc(row.category)} • IP: ${esc(row.ip || 'N/A')}</div>
+        <div class="mono" style="font-size:0.8rem;color:var(--cyan);margin:8px 0;">${esc(formatLocalTimestamp(row.timestamp, { withSeconds: true }))} • ${esc(row.level)} • ${esc(row.category)} • IP: ${esc(row.ip || 'N/A')}</div>
         <div style="margin-bottom:8px;"><strong>Actor:</strong> ${esc(row.actor)} &nbsp;|&nbsp; <strong>Target:</strong> ${esc(row.target || 'None')}</div>
         <pre class="mono" style="background:#050811;padding:12px;border-radius:10px;border:1px solid var(--border-subtle);overflow-x:auto;font-size:0.78rem;white-space:pre-wrap;">${esc(formatted || 'No extra details.')}</pre>
       `);
