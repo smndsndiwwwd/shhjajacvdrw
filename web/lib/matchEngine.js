@@ -29,37 +29,66 @@ import {
   consumeEnergy,
   addXP
 } from '../../src/game/utils.js';
-import { getPlayerEvent } from '../../src/game/events.js';
+import { getPlayerEvent, storyEvents } from '../../src/game/events.js';
 import { recordSystemLog } from '../../src/game/systemLog.js';
 import { getPlayerTier, PITCH_TYPES } from './helpers.js';
 
-// In-memory active web match sessions keyed by player.discord_id
-const activeMatches = new Map();
+// DB-backed active web match sessions keyed by player.discord_id (serverless safe)
 const MATCH_IDLE_TIMEOUT_MS = 45 * 60 * 1000; // Auto-end inactive matches after 45 minutes
 
-export function sweepExpiredWebMatches() {
-  const now = Date.now();
-  for (const [pid, match] of activeMatches.entries()) {
-    const lastTs = match.lastActivityAt || match.startedAt || now;
-    if (now - lastTs > MATCH_IDLE_TIMEOUT_MS) {
-      if (!match.finished) {
-        recordSystemLog({
-          level: 'WARN',
-          category: 'Match',
-          actor: match.playerName || pid,
-          target: match.opponent,
-          title: `Match Auto-Ended on Inactivity Timeout (${match.mode.toUpperCase()})`,
-          details: `${match.title}`
-        });
-      }
-      activeMatches.delete(pid);
+async function loadActiveMatch(playerId) {
+  const row = await db.get('SELECT match_json, updated_at FROM web_active_matches WHERE player_id = ?', playerId);
+  if (!row) return null;
+  try {
+    const match = JSON.parse(row.match_json);
+    if (match.attack) {
+      match.attack = Object.assign(new BowlingAttackManager([], match.totalOvers, match.pitch), match.attack);
     }
+    return match;
+  } catch (err) {
+    console.warn('Clearing corrupt match JSON for', playerId, err.message);
+    await db.run('DELETE FROM web_active_matches WHERE player_id = ?', playerId);
+    return null;
   }
 }
 
-setInterval(() => {
-  try { sweepExpiredWebMatches(); } catch {}
-}, 60 * 1000).unref();
+async function saveActiveMatch(playerId, match) {
+  const payload = JSON.stringify(match);
+  await db.run(
+    `INSERT INTO web_active_matches (player_id, match_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(player_id) DO UPDATE SET match_json = excluded.match_json, updated_at = excluded.updated_at`,
+    playerId,
+    payload,
+    Date.now()
+  );
+}
+
+async function deleteActiveMatch(playerId) {
+  await db.run('DELETE FROM web_active_matches WHERE player_id = ?', playerId);
+}
+
+export async function sweepExpiredWebMatches() {
+  const cutoff = Date.now() - MATCH_IDLE_TIMEOUT_MS;
+  const expired = await db.all('SELECT player_id, match_json FROM web_active_matches WHERE updated_at < ?', cutoff);
+  if (expired.length === 0) return;
+  for (const row of expired) {
+    try {
+      const match = JSON.parse(row.match_json);
+      if (!match.finished) {
+        await recordSystemLog({
+          level: 'WARN',
+          category: 'Match',
+          actor: match.playerName || row.player_id,
+          target: match.opponent,
+          title: `Match Auto-Ended on Inactivity Timeout (${(match.mode || 'match').toUpperCase()})`,
+          details: `${match.title}`
+        });
+      }
+    } catch {}
+  }
+  await db.run('DELETE FROM web_active_matches WHERE updated_at < ?', cutoff);
+}
 
 function randomPitch() {
   return PITCH_TYPES[Math.floor(Math.random() * PITCH_TYPES.length)];
@@ -75,8 +104,8 @@ function getPlayerHandShort(name = '') {
   return leftHints.some(h => name.includes(h)) ? 'Left-hand bat' : 'Right-hand bat';
 }
 
-export function computeTimingProfile(match, playerOpt = null) {
-  const player = playerOpt || db.prepare('SELECT confidence, form FROM players WHERE discord_id = ?').get(match.playerId) || { confidence: 50, form: 50 };
+export async function computeTimingProfile(match, playerOpt = null) {
+  const player = playerOpt || (await db.get('SELECT confidence, form FROM players WHERE discord_id = ?', match.playerId)) || { confidence: 50, form: 50 };
   const attrs = match.playerAttrs || {};
   const eq = match.eqBonuses || {};
   const skills = match.activeSkills || [];
@@ -176,15 +205,15 @@ function simulateAITeammateFinish(runsScored, currentTeamRuns, targetRuns, overs
   return { finalRuns: simRuns, finalWickets: simWickets, finalOvers: simOvers, events };
 }
 
-export function getActiveWebMatch(playerId) {
-  sweepExpiredWebMatches();
-  const m = activeMatches.get(playerId);
+export async function getActiveWebMatch(playerId) {
+  await sweepExpiredWebMatches();
+  const m = await loadActiveMatch(playerId);
   if (!m) return null;
-  return serializeMatchState(m);
+  return await serializeMatchState(m);
 }
 
-export function clearActiveWebMatch(playerId) {
-  activeMatches.delete(playerId);
+export async function clearActiveWebMatch(playerId) {
+  await deleteActiveMatch(playerId);
 }
 
 export function buildInitialReleaseCue(d) {
@@ -237,7 +266,7 @@ function prepareNextDelivery(match) {
   match.fullDeliveryReveal = buildFullDeliveryReveal(d);
 }
 
-function serializeMatchState(match) {
+async function serializeMatchState(match, playerOpt = null) {
   const isAllRounder = match.role === 'All-Rounder';
   const ballsUsed = match.phase === 'batting' ? match.bat.balls : match.bowl.ballsBowled;
   const ppOvers = match.totalOvers >= 15 ? 6 : match.totalOvers >= 5 ? 2 : 1;
@@ -304,7 +333,7 @@ function serializeMatchState(match) {
       line: match.nextDelivery.line,
       speed: match.nextDelivery.speed
     } : null,
-    timingProfile: match.phase === 'batting' ? computeTimingProfile(match) : null,
+    timingProfile: match.phase === 'batting' ? await computeTimingProfile(match, playerOpt) : null,
     fieldPreset: match.phase === 'batting' ? (match.nextDelivery?.fieldPreset || 'Balanced') : (match.lastFieldPreset || 'Balanced'),
     isPowerplay,
     lastBall: match.lastBall,
@@ -321,27 +350,27 @@ function serializeMatchState(match) {
   };
 }
 
-export function startWebMatch(playerId, options = {}) {
-  sweepExpiredWebMatches();
-  const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
+export async function startWebMatch(playerId, options = {}) {
+  await sweepExpiredWebMatches();
+  const player = await db.get('SELECT * FROM players WHERE discord_id = ?', playerId);
   if (!player) throw new Error('Create your cricketer first before starting a match.');
 
-  if (activeMatches.has(playerId)) {
-    const existing = activeMatches.get(playerId);
+  const existing = await loadActiveMatch(playerId);
+  if (existing) {
     if (existing.finished) {
-      activeMatches.delete(playerId);
+      await deleteActiveMatch(playerId);
     } else if (options.resume) {
-      return serializeMatchState(existing);
+      return await serializeMatchState(existing, player);
     } else {
       throw new Error(`You already have a live match in progress (${existing.title}). Resume or forfeit it before starting a new match!`);
     }
   }
 
   const { mode = 'practice', tournamentTeamId = null } = options;
-  const playerAttrs = getEffectiveAttributes(db, playerId);
-  const eqBonuses = getEquipmentBonuses(db, playerId);
-  const activeSkills = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(s => s.skill_key);
-  const currentEnergy = updateAndGetEnergy(db, playerId);
+  const playerAttrs = await getEffectiveAttributes(db, playerId);
+  const eqBonuses = await getEquipmentBonuses(db, playerId);
+  const activeSkills = (await db.all('SELECT skill_key FROM skills WHERE player_id = ?', playerId)).map(s => s.skill_key);
+  const currentEnergy = await updateAndGetEnergy(db, playerId);
 
   let matchConfig = null;
   let extraMeta = {};
@@ -362,7 +391,7 @@ export function startWebMatch(playerId, options = {}) {
       throw new Error(`Selection denied for ${tierName} (Chapter ${ch.id}): Requires Level ${reqLevel} & ${reqRep} Rep.`);
     }
 
-    consumeEnergy(db, playerId, 15);
+    await consumeEnergy(db, playerId, 15);
     matchConfig = {
       mode: 'chapter',
       title: `Chapter ${ch.id}: ${ch.name}`,
@@ -381,7 +410,7 @@ export function startWebMatch(playerId, options = {}) {
     };
   } else if (mode === 'practice') {
     if (currentEnergy < 15) throw new Error(`Not enough energy (${currentEnergy}/100). Need 15 Energy.`);
-    consumeEnergy(db, playerId, 15);
+    await consumeEnergy(db, playerId, 15);
     const lvl = player.level;
     matchConfig = {
       mode: 'practice',
@@ -399,7 +428,7 @@ export function startWebMatch(playerId, options = {}) {
     };
   } else if (mode === 'quick') {
     if (currentEnergy < 10) throw new Error(`Not enough energy (${currentEnergy}/100). Need 10 Energy.`);
-    consumeEnergy(db, playerId, 10);
+    await consumeEnergy(db, playerId, 10);
     const teams = QUICK_MATCH_CONFIG.teams;
     const compTeam = teams.find(t => t.id === tournamentTeamId) || teams[Math.floor(Math.random() * teams.length)];
     const pitch = randomPitch();
@@ -425,7 +454,7 @@ export function startWebMatch(playerId, options = {}) {
     };
   } else if (mode === 'tournament') {
     if (currentEnergy < 15) throw new Error(`Not enough energy (${currentEnergy}/100). Need 15 Energy.`);
-    const activeRun = db.prepare("SELECT * FROM active_tournament_run WHERE player_id = ? AND status = 'active'").get(playerId);
+    const activeRun = await db.get("SELECT * FROM active_tournament_run WHERE player_id = ? AND status = 'active'", playerId);
     if (!activeRun) throw new Error('No active tournament run found. Enter a tournament first!');
     const tournament = getTournamentById(activeRun.tournament_id);
     if (!tournament) throw new Error('Tournament configuration missing.');
@@ -433,7 +462,7 @@ export function startWebMatch(playerId, options = {}) {
     const round = bracket.rounds[bracket.roundIndex];
     const userMatch = round.matches.find(m => m.isUserMatch);
     const oppTeam = tournament.teams.find(t => t.name === userMatch.team2) || { name: userMatch.team2, rating: 65 };
-    consumeEnergy(db, playerId, 15);
+    await consumeEnergy(db, playerId, 15);
 
     const pitch = randomPitch();
     const totalOvers = tournament.overs || 20;
@@ -464,7 +493,7 @@ export function startWebMatch(playerId, options = {}) {
     };
     extraMeta = { tournament, activeRun, bracket };
   } else if (mode === 'franchise') {
-    const pf = db.prepare('SELECT * FROM player_franchise WHERE player_id = ?').get(playerId);
+    const pf = await db.get('SELECT * FROM player_franchise WHERE player_id = ?', playerId);
     if (!pf || pf.status !== 'active') throw new Error('No active franchise contract. Register and complete an auction first.');
     const league = franchiseLeagues[pf.league_id] || Object.values(franchiseLeagues)[0];
     if (pf.current_round > league.seasonLength + 2) throw new Error('Season matches finished! Click Finish Season & Collect Awards.');
@@ -475,7 +504,7 @@ export function startWebMatch(playerId, options = {}) {
     if (pf.current_round <= league.seasonLength) {
       oppTeam = otherTeams[(pf.current_round - 1) % otherTeams.length] || otherTeams[0];
     } else {
-      const standings = db.prepare('SELECT team_id FROM franchise_standings WHERE player_id = ? ORDER BY points DESC, nrr DESC').all(playerId);
+      const standings = await db.all('SELECT team_id FROM franchise_standings WHERE player_id = ? ORDER BY points DESC, nrr DESC', playerId);
       const userRank = standings.findIndex(s => s.team_id === pf.team_id) + 1;
       if (userRank > 4) throw new Error(`Your team finished #${userRank} and missed Top-4 Playoffs. Click Complete Season.`);
       if (pf.current_round === league.seasonLength + 1) {
@@ -500,13 +529,17 @@ export function startWebMatch(playerId, options = {}) {
     if (!selected) {
       // Benched simulation
       const won = Math.random() < 0.5;
-      db.prepare('UPDATE player_franchise SET current_round = current_round + 1 WHERE player_id = ?').run(playerId);
+      await db.run('UPDATE player_franchise SET current_round = current_round + 1 WHERE player_id = ?', playerId);
       if (pf.current_round <= league.seasonLength) {
-        db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-          .run(won ? 1 : 0, won ? 0 : 1, won ? 2 : 0, won ? 0.35 : -0.35, playerId, pf.team_id);
-        db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-          .run(won ? 0 : 1, won ? 1 : 0, won ? 0 : 2, won ? -0.35 : 0.35, playerId, oppTeam.id);
-        simulateOtherFranchiseFixtures(playerId, pf.league_id, pf.team_id, oppTeam.id);
+        await db.run(
+          'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+          won ? 1 : 0, won ? 0 : 1, won ? 2 : 0, won ? 0.35 : -0.35, playerId, pf.team_id
+        );
+        await db.run(
+          'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+          won ? 0 : 1, won ? 1 : 0, won ? 0 : 2, won ? -0.35 : 0.35, playerId, oppTeam.id
+        );
+        await simulateOtherFranchiseFixtures(playerId, pf.league_id, pf.team_id, oppTeam.id);
       }
       return {
         benched: true,
@@ -518,7 +551,7 @@ export function startWebMatch(playerId, options = {}) {
     }
 
     if (currentEnergy < 15) throw new Error(`Not enough energy (${currentEnergy}/100). Need 15 Energy.`);
-    consumeEnergy(db, playerId, 15);
+    await consumeEnergy(db, playerId, 15);
 
     const pitch = randomPitch();
     let firstRuns = 165 + Math.floor(Math.random() * 26);
@@ -583,7 +616,7 @@ export function startWebMatch(playerId, options = {}) {
   let preOvers = 0;
   const preNotes = [];
   if ((matchConfig.mode === 'tournament' || matchConfig.mode === 'franchise') && !isBowlerOnly) {
-    const pos = getPlayerBattingPosition(player, db);
+    const pos = await getPlayerBattingPosition(player, db);
     if (pos.targetWickets > 0) {
       preOvers = Math.min(matchConfig.totalOvers - 2, Math.max(1, pos.targetWickets * 2));
       for (let ov = 1; ov <= preOvers; ov++) {
@@ -650,9 +683,9 @@ export function startWebMatch(playerId, options = {}) {
   };
 
   prepareNextDelivery(matchState);
-  activeMatches.set(playerId, matchState);
+  await saveActiveMatch(playerId, matchState);
 
-  recordSystemLog({
+  await recordSystemLog({
     level: 'MATCH',
     category: 'Match',
     actor: player.name,
@@ -661,25 +694,25 @@ export function startWebMatch(playerId, options = {}) {
     details: `${matchConfig.title} | Pitch: ${matchConfig.pitch}`
   });
 
-  return serializeMatchState(matchState);
+  return await serializeMatchState(matchState, player);
 }
 
-export function playWebMatchBall(playerId, action = {}) {
-  sweepExpiredWebMatches();
-  const match = activeMatches.get(playerId);
+export async function playWebMatchBall(playerId, action = {}) {
+  await sweepExpiredWebMatches();
+  const match = await loadActiveMatch(playerId);
   if (!match) throw new Error('No active match found (or it timed out from inactivity).');
-  if (match.finished) return serializeMatchState(match);
+  if (match.finished) return await serializeMatchState(match);
   match.lastActivityAt = Date.now();
 
-  const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
+  const player = await db.get('SELECT * FROM players WHERE discord_id = ?', playerId);
   if (!player) throw new Error('Player profile missing.');
 
   if (match.phase === 'batting') {
     const { stance = 'In Line', footwork = 'Front Foot', intent = 'Stroke', zone = 'Cover', timingQuality = null, needlePos = null } = action;
     const isLeave = footwork === 'Leave' || intent === 'Leave';
     const equippedShot = !isLeave
-      ? getPlayerEquippedShot(playerId, footwork, intent, zone)
-      : getPlayerEquippedShot(playerId, footwork !== 'Leave' ? footwork : 'Front Foot', 'Leave', 'In Line');
+      ? await getPlayerEquippedShot(playerId, footwork, intent, zone)
+      : await getPlayerEquippedShot(playerId, footwork !== 'Leave' ? footwork : 'Front Foot', 'Leave', 'In Line');
 
     const deliv = match.nextDelivery;
     const isClutch = (match.bat.ballsLimit - match.bat.balls) <= 5;
@@ -758,7 +791,7 @@ export function playWebMatchBall(playerId, action = {}) {
     else if (simResult.runs > 0) confChange = 2;
     else if (simResult.wicket) confChange = match.activeSkills.includes('ice_veins') ? 0 : -15;
     player.confidence = Math.min(100, Math.max(10, player.confidence + confChange));
-    db.prepare('UPDATE players SET confidence = ? WHERE discord_id = ?').run(player.confidence, playerId);
+    await db.run('UPDATE players SET confidence = ? WHERE discord_id = ?', player.confidence, playerId);
 
     const shotName = isLeave
       ? 'Shouldered Arms (Leave)'
@@ -820,7 +853,7 @@ export function playWebMatchBall(playerId, action = {}) {
           : `💔 After your dismissal, team finished at ${simTeam.finalRuns}/${simTeam.finalWickets} and fell short of ${match.bat.targetRuns}.`
         );
       }
-      finalizeWebMatch(match, player, won);
+      await finalizeWebMatch(match, player, won);
     } else {
       prepareNextDelivery(match);
     }
@@ -905,42 +938,46 @@ export function playWebMatchBall(playerId, action = {}) {
     const userWon = match.bowl.wicketsTaken >= 10 || (match.bowl.ballsBowled >= match.bowl.ballsLimit && match.bowl.runsConceded < match.bowl.targetRuns);
 
     if (oppWon || userWon) {
-      finalizeWebMatch(match, player, userWon);
+      await finalizeWebMatch(match, player, userWon);
     }
   }
 
-  return serializeMatchState(match);
+  await saveActiveMatch(playerId, match);
+  return await serializeMatchState(match, player);
 }
 
-export function forfeitWebMatch(playerId) {
-  const match = activeMatches.get(playerId);
+export async function forfeitWebMatch(playerId) {
+  const match = await loadActiveMatch(playerId);
   if (!match) return null;
+  let player = null;
   if (!match.finished) {
-    const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
+    player = await db.get('SELECT * FROM players WHERE discord_id = ?', playerId);
     if (player) {
       player.confidence = Math.max(10, player.confidence - 15);
-      db.prepare('UPDATE players SET confidence = ? WHERE discord_id = ?').run(player.confidence, playerId);
-      finalizeWebMatch(match, player, false, true);
+      await db.run('UPDATE players SET confidence = ? WHERE discord_id = ?', player.confidence, playerId);
+      await finalizeWebMatch(match, player, false, true);
     }
   }
-  const serialized = serializeMatchState(match);
-  activeMatches.delete(playerId);
+  const serialized = await serializeMatchState(match, player);
+  await deleteActiveMatch(playerId);
   return serialized;
 }
 
-export function resolveStoryEventChoice(playerId, eventId, choiceIndex) {
-  const match = activeMatches.get(playerId);
+export async function resolveStoryEventChoice(playerId, eventId, choiceIndex) {
+  const match = await loadActiveMatch(playerId);
   const event = match?.storyEvent;
   if (!event || event.id !== eventId) {
     throw new Error('Career event expired or not found.');
   }
-  const choice = event.choices[Number(choiceIndex)];
+  const authoritative = storyEvents.find(e => e.id === eventId) || event;
+  const choice = authoritative.choices[Number(choiceIndex)];
   if (!choice) throw new Error('Invalid choice.');
   if (typeof choice.dbUpdate === 'function') {
-    choice.dbUpdate(db, playerId);
+    await choice.dbUpdate(db, playerId);
   }
   match.storyEvent = null;
-  recordSystemLog({
+  await saveActiveMatch(playerId, match);
+  await recordSystemLog({
     level: 'INFO',
     category: 'CareerEvent',
     actor: match.playerName,
@@ -950,7 +987,7 @@ export function resolveStoryEventChoice(playerId, eventId, choiceIndex) {
   return { label: choice.label, resultText: choice.resultText };
 }
 
-function finalizeWebMatch(match, player, won, isForfeit = false) {
+async function finalizeWebMatch(match, player, won, isForfeit = false) {
   match.finished = true;
   const playerId = player.discord_id;
   const runs = match.bat.runs;
@@ -964,21 +1001,20 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   const oversBowled = Number((match.bowl.ballsBowled / 6).toFixed(1));
 
   // Career stats update
-  db.prepare(`
-    UPDATE stats
-    SET matches = matches + 1,
-        runs = runs + ?,
-        balls = balls + ?,
-        fours = fours + ?,
-        sixes = sixes + ?,
-        fifties = fifties + ?,
-        hundreds = hundreds + ?,
-        ducks = ducks + ?,
-        wickets = wickets + ?,
-        overs = overs + ?,
-        runs_conceded = runs_conceded + ?
-    WHERE player_id = ?
-  `).run(
+  await db.run(
+    `UPDATE stats
+     SET matches = matches + 1,
+         runs = runs + ?,
+         balls = balls + ?,
+         fours = fours + ?,
+         sixes = sixes + ?,
+         fifties = fifties + ?,
+         hundreds = hundreds + ?,
+         ducks = ducks + ?,
+         wickets = wickets + ?,
+         overs = overs + ?,
+         runs_conceded = runs_conceded + ?
+     WHERE player_id = ?`,
     runs, balls, fours, sixes,
     (runs >= 50 && runs < 100) ? 1 : 0,
     runs >= 100 ? 1 : 0,
@@ -987,10 +1023,11 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   );
 
   // Match history log
-  db.prepare(`
-    INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(playerId, match.opponent, match.mode, runs, balls, fours, sixes, dismissal, bowlingWickets, runsConceded, oversBowled, won ? 'Won' : 'Lost');
+  await db.run(
+    `INSERT INTO match_history (player_id, opponent, match_type, runs, balls, fours, sixes, dismissal, wickets, runs_conceded, overs_bowled, result)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    playerId, match.opponent, match.mode, runs, balls, fours, sixes, dismissal, bowlingWickets, runsConceded, oversBowled, won ? 'Won' : 'Lost'
+  );
 
   const tier = getPlayerTier(player.level);
   let xpEarned = won ? (match.rewardXP || 100) : (match.lossXP || Math.round((match.rewardXP || 100) * 0.25));
@@ -1000,27 +1037,28 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   let bonusNotes = [];
 
   if (match.mode === 'chapter' || match.mode === 'practice') {
-    const activeContract = db.prepare('SELECT id, salary_per_match, remaining_seasons FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
+    const activeContract = await db.get('SELECT id, salary_per_match, remaining_seasons FROM contracts WHERE player_id = ? AND active = 1', playerId);
     const baseSalary = activeContract ? activeContract.salary_per_match : tier.stipend;
     const matchSalary = won ? Math.round(baseSalary * 0.4) : Math.round(baseSalary * 0.15);
     coinsEarned += matchSalary;
 
     if (match.mode === 'chapter' && won) {
-      db.prepare('UPDATE players SET current_chapter = current_chapter + 1 WHERE discord_id = ?').run(playerId);
+      await db.run('UPDATE players SET current_chapter = current_chapter + 1 WHERE discord_id = ?', playerId);
       if (match.chapterUnlockItem) {
         const item = match.chapterUnlockItem;
-        db.prepare(`
-          INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-          VALUES (?, ?, ?, ?, ?, ?, 0)
-        `).run(playerId, item.item_id, item.name, item.type, item.rarity, JSON.stringify(item.bonuses));
+        await db.run(
+          `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+           VALUES (?, ?, ?, ?, ?, ?, 0)`,
+          playerId, item.item_id, item.name, item.type, item.rarity, JSON.stringify(item.bonuses)
+        );
       }
       if (match.chapterUnlockMsg) bonusNotes.push(match.chapterUnlockMsg);
     }
 
     if (activeContract) {
-      db.prepare('UPDATE contracts SET remaining_seasons = remaining_seasons - 1 WHERE id = ?').run(activeContract.id);
+      await db.run('UPDATE contracts SET remaining_seasons = remaining_seasons - 1 WHERE id = ?', activeContract.id);
       if (activeContract.remaining_seasons - 1 <= 0) {
-        db.prepare('DELETE FROM contracts WHERE id = ?').run(activeContract.id);
+        await db.run('DELETE FROM contracts WHERE id = ?', activeContract.id);
       }
     }
 
@@ -1032,38 +1070,41 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
     const advanceResult = advanceBracket(bracket, won);
     if (won && advanceResult.finished && advanceResult.won) {
       // Champion!
-      db.prepare('DELETE FROM active_tournament_run WHERE player_id = ?').run(playerId);
-      db.prepare(`
-        INSERT INTO player_tournaments (player_id, tournament_id, won, times_played, high_score, unlocked)
-        VALUES (?, ?, 1, 1, ?, 1)
-        ON CONFLICT(player_id, tournament_id) DO UPDATE SET
-          won = won + 1,
-          times_played = times_played + 1,
-          high_score = MAX(high_score, ?)
-      `).run(playerId, tournament.id, runs, runs);
+      await db.run('DELETE FROM active_tournament_run WHERE player_id = ?', playerId);
+      await db.run(
+        `INSERT INTO player_tournaments (player_id, tournament_id, won, times_played, high_score, unlocked)
+         VALUES (?, ?, 1, 1, ?, 1)
+         ON CONFLICT(player_id, tournament_id) DO UPDATE SET
+           won = won + 1,
+           times_played = times_played + 1,
+           high_score = MAX(high_score, ?)`,
+        playerId, tournament.id, runs, runs
+      );
       xpEarned += tournament.rewards.xp;
       coinsEarned += Math.round(tournament.rewards.coins * 0.4);
       repEarned += tournament.rewards.reputation;
       tokenReward += 2;
       bonusNotes.push(`🏆 CHAMPION! Won ${tournament.rewards.trophy}!`);
     } else if (!won) {
-      db.prepare('DELETE FROM active_tournament_run WHERE player_id = ?').run(playerId);
-      db.prepare(`
-        INSERT INTO player_tournaments (player_id, tournament_id, won, times_played, high_score, unlocked)
-        VALUES (?, ?, 0, 1, ?, 1)
-        ON CONFLICT(player_id, tournament_id) DO UPDATE SET
-          times_played = times_played + 1,
-          high_score = MAX(high_score, ?)
-      `).run(playerId, tournament.id, runs, runs);
+      await db.run('DELETE FROM active_tournament_run WHERE player_id = ?', playerId);
+      await db.run(
+        `INSERT INTO player_tournaments (player_id, tournament_id, won, times_played, high_score, unlocked)
+         VALUES (?, ?, 0, 1, ?, 1)
+         ON CONFLICT(player_id, tournament_id) DO UPDATE SET
+           times_played = times_played + 1,
+           high_score = MAX(high_score, ?)`,
+        playerId, tournament.id, runs, runs
+      );
       bonusNotes.push(`Knocked out of ${tournament.name}.`);
     } else {
       const nextRound = bracket.rounds[bracket.roundIndex];
       const nextMatch = nextRound.matches.find(m => m.isUserMatch);
-      db.prepare(`
-        UPDATE active_tournament_run
-        SET current_round = ?, opponent_team = ?, bracket_json = ?
-        WHERE player_id = ?
-      `).run(bracket.roundIndex + 1, nextMatch.team2, JSON.stringify(bracket), playerId);
+      await db.run(
+        `UPDATE active_tournament_run
+         SET current_round = ?, opponent_team = ?, bracket_json = ?
+         WHERE player_id = ?`,
+        bracket.roundIndex + 1, nextMatch.team2, JSON.stringify(bracket), playerId
+      );
       bonusNotes.push(`Advanced to ${nextRound.name} vs ${nextMatch.team2}!`);
     }
   } else if (match.mode === 'franchise') {
@@ -1076,35 +1117,41 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
     coinsEarned = matchSalary + runBonus + wicketBonus + centuryBonus;
 
     const userDismissed = match.bat.wickets > 0 ? 1 : 0;
-    db.prepare(`
-      UPDATE player_franchise
-      SET runs = runs + ?, balls = balls + ?, fours = fours + ?, sixes = sixes + ?, dismissals = dismissals + ?,
-          matches_played = matches_played + 1, wickets = wickets + ?, runs_conceded = runs_conceded + ?, overs_bowled = overs_bowled + ?,
-          current_round = current_round + 1
-      WHERE player_id = ?
-    `).run(runs, balls, fours, sixes, userDismissed, bowlingWickets, runsConceded, oversBowled, playerId);
+    await db.run(
+      `UPDATE player_franchise
+       SET runs = runs + ?, balls = balls + ?, fours = fours + ?, sixes = sixes + ?, dismissals = dismissals + ?,
+           matches_played = matches_played + 1, wickets = wickets + ?, runs_conceded = runs_conceded + ?, overs_bowled = overs_bowled + ?,
+           current_round = current_round + 1
+       WHERE player_id = ?`,
+      runs, balls, fours, sixes, userDismissed, bowlingWickets, runsConceded, oversBowled, playerId
+    );
 
     if (pf.current_round <= league.seasonLength) {
-      db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-        .run(won ? 1 : 0, won ? 0 : 1, won ? 2 : 0, won ? 0.75 : -0.75, playerId, pf.team_id);
-      db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-        .run(won ? 0 : 1, won ? 1 : 0, won ? 0 : 2, won ? -0.75 : 0.75, playerId, oppTeam.id);
-      simulateOtherFranchiseFixtures(playerId, pf.league_id, pf.team_id, oppTeam.id);
+      await db.run(
+        'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+        won ? 1 : 0, won ? 0 : 1, won ? 2 : 0, won ? 0.75 : -0.75, playerId, pf.team_id
+      );
+      await db.run(
+        'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+        won ? 0 : 1, won ? 1 : 0, won ? 0 : 2, won ? -0.75 : 0.75, playerId, oppTeam.id
+      );
+      await simulateOtherFranchiseFixtures(playerId, pf.league_id, pf.team_id, oppTeam.id);
     }
-    simulateFranchiseAIPlayers(playerId, pf.league_id);
+    await simulateFranchiseAIPlayers(playerId, pf.league_id);
     bonusNotes.push(`Match Fee: ${matchSalary} | Performance Bonus: ${runBonus + wicketBonus + centuryBonus}`);
   }
 
-  db.prepare(`
-    UPDATE players
-    SET coins = coins + ?,
-        training_tokens = training_tokens + ?,
-        reputation = reputation + ?,
-        form = MIN(100, MAX(20, form + ?))
-    WHERE discord_id = ?
-  `).run(coinsEarned, tokenReward, repEarned, won ? 10 : -10, playerId);
+  await db.run(
+    `UPDATE players
+     SET coins = coins + ?,
+         training_tokens = training_tokens + ?,
+         reputation = reputation + ?,
+         form = MIN(100, MAX(20, form + ?))
+     WHERE discord_id = ?`,
+    coinsEarned, tokenReward, repEarned, won ? 10 : -10, playerId
+  );
 
-  const xpResult = addXP(db, playerId, xpEarned);
+  const xpResult = await addXP(db, playerId, xpEarned);
 
   match.resultSummary = {
     won,
@@ -1120,7 +1167,7 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
     bowling: { wickets: bowlingWickets, runsConceded, overs: oversBowled }
   };
 
-  recordSystemLog({
+  await recordSystemLog({
     level: 'MATCH',
     category: 'Match',
     actor: player.name,
@@ -1133,7 +1180,7 @@ function finalizeWebMatch(match, player, won, isForfeit = false) {
   });
 }
 
-export function simulateOtherFranchiseFixtures(playerId, leagueId, userTeamId, oppTeamId) {
+export async function simulateOtherFranchiseFixtures(playerId, leagueId, userTeamId, oppTeamId) {
   const league = franchiseLeagues[leagueId];
   if (!league) return;
   const teamsToSim = league.teams.filter(t => t.id !== userTeamId && t.id !== oppTeamId);
@@ -1143,17 +1190,20 @@ export function simulateOtherFranchiseFixtures(playerId, leagueId, userTeamId, o
       const b = teamsToSim[i + 1];
       const aWins = Math.random() < 0.5;
       const nrr = 0.2 + Math.random() * 0.8;
-      db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-        .run(aWins ? 1 : 0, aWins ? 0 : 1, aWins ? 2 : 0, aWins ? nrr : -nrr, playerId, a.id);
-      db.prepare('UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?')
-        .run(aWins ? 0 : 1, aWins ? 1 : 0, aWins ? 0 : 2, aWins ? -nrr : nrr, playerId, b.id);
+      await db.run(
+        'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+        aWins ? 1 : 0, aWins ? 0 : 1, aWins ? 2 : 0, aWins ? nrr : -nrr, playerId, a.id
+      );
+      await db.run(
+        'UPDATE franchise_standings SET played=played+1, won=won+?, lost=lost+?, points=points+?, nrr=nrr+? WHERE player_id=? AND team_id=?',
+        aWins ? 0 : 1, aWins ? 1 : 0, aWins ? 0 : 2, aWins ? -nrr : nrr, playerId, b.id
+      );
     }
   }
 }
 
-export function simulateFranchiseAIPlayers(playerId, leagueId) {
-  const ais = db.prepare('SELECT id, role FROM ai_players WHERE player_id = ? AND league_id = ?').all(playerId, leagueId);
-  const upd = db.prepare('UPDATE ai_players SET runs = runs + ?, wickets = wickets + ? WHERE id = ?');
+export async function simulateFranchiseAIPlayers(playerId, leagueId) {
+  const ais = await db.all('SELECT id, role FROM ai_players WHERE player_id = ? AND league_id = ?', playerId, leagueId);
   for (const ai of ais) {
     let r = 0, w = 0;
     const roll = Math.random();
@@ -1162,6 +1212,6 @@ export function simulateFranchiseAIPlayers(playerId, leagueId) {
     } else {
       w = roll < 0.3 ? 0 : roll < 0.7 ? 1 : roll < 0.95 ? 2 : 3;
     }
-    upd.run(r, w, ai.id);
+    await db.run('UPDATE ai_players SET runs = runs + ?, wickets = wickets + ? WHERE id = ?', r, w, ai.id);
   }
 }

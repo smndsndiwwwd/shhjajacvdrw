@@ -15,8 +15,8 @@ export function getLevelRequiredXP(level) {
  * @param {string} playerId - Discord user ID
  * @returns {object} Combined attribute bonuses
  */
-export function getEquipmentBonuses(db, playerId) {
-  const equipped = db.prepare('SELECT bonuses FROM inventory WHERE player_id = ? AND equipped = 1').all(playerId);
+export async function getEquipmentBonuses(db, playerId) {
+  const equipped = await db.all('SELECT bonuses FROM inventory WHERE player_id = ? AND equipped = 1', playerId);
   const total = {};
   
   for (const item of equipped) {
@@ -38,11 +38,11 @@ export function getEquipmentBonuses(db, playerId) {
  * @param {string} playerId - Discord user ID
  * @returns {object} Total attributes
  */
-export function getEffectiveAttributes(db, playerId) {
-  const base = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(playerId);
+export async function getEffectiveAttributes(db, playerId) {
+  const base = await db.get('SELECT * FROM attributes WHERE player_id = ?', playerId);
   if (!base) return {};
 
-  const bonuses = getEquipmentBonuses(db, playerId);
+  const bonuses = await getEquipmentBonuses(db, playerId);
   const effective = { ...base };
 
   for (const [attr, val] of Object.entries(bonuses)) {
@@ -62,8 +62,8 @@ export function getEffectiveAttributes(db, playerId) {
  * @param {string} playerId - Discord user ID
  * @returns {number} Current energy (0-100)
  */
-export function updateAndGetEnergy(db, playerId) {
-  const player = db.prepare('SELECT energy, last_energy_update FROM players WHERE discord_id = ?').get(playerId);
+export async function updateAndGetEnergy(db, playerId) {
+  const player = await db.get('SELECT energy, last_energy_update FROM players WHERE discord_id = ?', playerId);
   if (!player) return 0;
 
   const now = Date.now();
@@ -84,11 +84,14 @@ export function updateAndGetEnergy(db, playerId) {
     const newEnergy = Math.min(100, player.energy + recovery);
     
     // Update energy and save current time as epoch integer
-    db.prepare(`
-      UPDATE players 
-      SET energy = ?, last_energy_update = ? 
-      WHERE discord_id = ?
-    `).run(newEnergy, now, playerId);
+    await db.run(
+      `UPDATE players 
+       SET energy = ?, last_energy_update = ? 
+       WHERE discord_id = ?`,
+      newEnergy,
+      now,
+      playerId
+    );
     
     return newEnergy;
   }
@@ -103,16 +106,19 @@ export function updateAndGetEnergy(db, playerId) {
  * @param {number} amount - Energy to consume
  * @returns {boolean} Whether energy was successfully consumed
  */
-export function consumeEnergy(db, playerId, amount) {
-  const currentEnergy = updateAndGetEnergy(db, playerId);
+export async function consumeEnergy(db, playerId, amount) {
+  const currentEnergy = await updateAndGetEnergy(db, playerId);
   if (currentEnergy < amount) return false;
 
   const now = Date.now();
-  db.prepare(`
-    UPDATE players 
-    SET energy = energy - ?, last_energy_update = ? 
-    WHERE discord_id = ?
-  `).run(amount, now, playerId);
+  await db.run(
+    `UPDATE players 
+     SET energy = energy - ?, last_energy_update = ? 
+     WHERE discord_id = ?`,
+    amount,
+    now,
+    playerId
+  );
   return true;
 }
 
@@ -123,8 +129,8 @@ export function consumeEnergy(db, playerId, amount) {
  * @param {number} amount - XP to add
  * @returns {object} Level up metadata and unlocked achievements
  */
-export function addXP(db, playerId, amount) {
-  const player = db.prepare('SELECT level, xp, skill_points FROM players WHERE discord_id = ?').get(playerId);
+export async function addXP(db, playerId, amount) {
+  const player = await db.get('SELECT level, xp, skill_points FROM players WHERE discord_id = ?', playerId);
   if (!player) return { levelUp: false, newLevel: 1, achievementsUnlocked: [] };
 
   let currentLevel = player.level;
@@ -141,22 +147,28 @@ export function addXP(db, playerId, amount) {
     req = getLevelRequiredXP(currentLevel);
   }
 
-  db.prepare('UPDATE players SET level = ?, xp = ?, skill_points = skill_points + ? WHERE discord_id = ?')
-    .run(currentLevel, currentXP, skillPointsGained, playerId);
+  await db.run(
+    'UPDATE players SET level = ?, xp = ?, skill_points = skill_points + ? WHERE discord_id = ?',
+    currentLevel,
+    currentXP,
+    skillPointsGained,
+    playerId
+  );
 
   // Level up also gives a single targeted boost to a core attribute (capped at 99)
   if (levelUpOccurred) {
     const coreAttrs = ['power', 'timing', 'technique', 'fitness', 'defense', 'running', 'fielding', 'reflex', 'stamina', 'accuracy'];
     const boostedAttr = coreAttrs[Math.floor(Math.random() * coreAttrs.length)];
-    db.prepare(`
-      UPDATE attributes 
-      SET ${boostedAttr} = MIN(99, ${boostedAttr} + 1)
-      WHERE player_id = ?
-    `).run(playerId);
+    await db.run(
+      `UPDATE attributes 
+       SET ${boostedAttr} = MIN(99, ${boostedAttr} + 1)
+       WHERE player_id = ?`,
+      playerId
+    );
   }
 
   // Check achievements after XP and potential level updates
-  const achievementsUnlocked = checkAchievements(db, playerId);
+  const achievementsUnlocked = await checkAchievements(db, playerId);
 
   return {
     levelUp: levelUpOccurred,

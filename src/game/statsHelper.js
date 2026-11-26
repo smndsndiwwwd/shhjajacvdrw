@@ -153,13 +153,13 @@ function classifyMode(matchType = '') {
   return 'practice';
 }
 
-export function getPlayerModeStatsBreakdown(db, playerId) {
-  const player = db.prepare('SELECT current_chapter, franchise_titles FROM players WHERE discord_id = ?').get(playerId) || {};
-  const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-  const historyRows = db.prepare('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC').all(playerId);
-  const pf = db.prepare('SELECT * FROM player_franchise WHERE player_id = ?').get(playerId) || null;
-  const chalStats = db.prepare('SELECT * FROM challenge_stats WHERE player_id = ?').get(playerId) || { played: 0, won: 0, lost: 0, runs: 0, wickets: 0, fours: 0, sixes: 0 };
-  const tourneyRows = db.prepare('SELECT won, times_played, high_score FROM player_tournaments WHERE player_id = ?').all(playerId);
+export async function getPlayerModeStatsBreakdown(db, playerId) {
+  const player = (await db.get('SELECT current_chapter, franchise_titles FROM players WHERE discord_id = ?', playerId)) || {};
+  const stats = (await db.get('SELECT * FROM stats WHERE player_id = ?', playerId)) || {};
+  const historyRows = await db.all('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC', playerId);
+  const pf = (await db.get('SELECT * FROM player_franchise WHERE player_id = ?', playerId)) || null;
+  const chalStats = (await db.get('SELECT * FROM challenge_stats WHERE player_id = ?', playerId)) || { played: 0, won: 0, lost: 0, runs: 0, wickets: 0, fours: 0, sixes: 0 };
+  const tourneyRows = await db.all('SELECT won, times_played, high_score FROM player_tournaments WHERE player_id = ?', playerId);
 
   const grouped = { chapter: [], practice: [], tournament: [], franchise: [], challenge: [] };
   for (const row of historyRows) {

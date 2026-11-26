@@ -3,7 +3,7 @@ import db from '../database/db.js';
 /**
  * Records a structured audit/system log entry in SQLite `admin_logs`.
  */
-export function recordSystemLog({
+export async function recordSystemLog({
   level = 'INFO',
   category = 'System',
   actor = 'system',
@@ -30,10 +30,9 @@ export function recordSystemLog({
       }
     }
 
-    db.prepare(`
-      INSERT INTO admin_logs (timestamp, level, category, actor, target, title, details, ip)
-      VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.run(
+      `INSERT INTO admin_logs (timestamp, level, category, actor, target, title, details, ip)
+       VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)`,
       String(level).toUpperCase(),
       String(category),
       String(actor || 'system'),
@@ -47,90 +46,90 @@ export function recordSystemLog({
   }
 }
 
-export function getAdminLogInsights() {
-  const loginsToday = db.prepare(`
+export async function getAdminLogInsights() {
+  const loginsToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE category = 'Auth'
       AND title IN ('Player Logged In', 'Admin Logged In')
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const uniqueLoginsToday = db.prepare(`
+  const uniqueLoginsToday = (await db.get(`
     SELECT COUNT(DISTINCT actor) as cnt FROM admin_logs
     WHERE category = 'Auth'
       AND title IN ('Player Logged In', 'Admin Logged In')
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const failedLoginsToday = db.prepare(`
+  const failedLoginsToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE category = 'Auth'
       AND title = 'Failed Login Attempt'
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const registrationsToday = db.prepare(`
+  const registrationsToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE category = 'Auth'
       AND title = 'New Web Account Created'
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const careersCreatedToday = db.prepare(`
+  const careersCreatedToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE category = 'Career'
       AND title = 'New Career Player Created'
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const matchesToday = db.prepare(`
+  const matchesToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM match_history
     WHERE date(date) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const economyToday = db.prepare(`
+  const economyToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE level IN ('ECONOMY', 'ADMIN')
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const alertsLast24h = db.prepare(`
+  const alertsLast24h = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE level IN ('WARN', 'ERROR')
       AND timestamp >= datetime('now', '-24 hours')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const loginsLast7d = db.prepare(`
+  const loginsLast7d = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE category = 'Auth'
       AND title IN ('Player Logged In', 'Admin Logged In')
       AND timestamp >= datetime('now', '-7 days')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const topActorsToday = db.prepare(`
+  const topActorsToday = await db.all(`
     SELECT actor, COUNT(*) as events
     FROM admin_logs
     WHERE date(timestamp) = date('now')
     GROUP BY actor
     ORDER BY events DESC
     LIMIT 6
-  `).all();
+  `);
 
-  const categoryBreakdownToday = db.prepare(`
+  const categoryBreakdownToday = await db.all(`
     SELECT category, COUNT(*) as cnt
     FROM admin_logs
     WHERE date(timestamp) = date('now')
     GROUP BY category
     ORDER BY cnt DESC
-  `).all();
+  `);
 
-  const rawHourly = db.prepare(`
+  const rawHourly = await db.all(`
     SELECT strftime('%H', timestamp) as hr, COUNT(*) as cnt
     FROM admin_logs
     WHERE timestamp >= datetime('now', '-24 hours')
     GROUP BY hr
     ORDER BY hr ASC
-  `).all();
+  `);
 
   const hourMap = new Map(rawHourly.map(r => [Number(r.hr), r.cnt]));
   const currentUtcHour = new Date().getUTCHours();
@@ -143,27 +142,27 @@ export function getAdminLogInsights() {
     });
   }
 
-  const recentLogins = db.prepare(`
+  const recentLogins = await db.all(`
     SELECT actor, title, ip, timestamp
     FROM admin_logs
     WHERE category = 'Auth' AND title IN ('Player Logged In', 'Admin Logged In', 'Failed Login Attempt')
     ORDER BY id DESC
     LIMIT 8
-  `).all();
+  `);
 
-  const adminActionsToday = db.prepare(`
+  const adminActionsToday = (await db.get(`
     SELECT COUNT(*) as cnt FROM admin_logs
     WHERE (level = 'ADMIN' OR category = 'Admin')
       AND date(timestamp) = date('now')
-  `).get()?.cnt || 0;
+  `))?.cnt || 0;
 
-  const recentAdminActions = db.prepare(`
+  const recentAdminActions = await db.all(`
     SELECT id, actor, target, title, details, ip, timestamp
     FROM admin_logs
     WHERE level = 'ADMIN' OR category = 'Admin'
     ORDER BY id DESC
     LIMIT 15
-  `).all();
+  `);
 
   return {
     loginsToday,
@@ -184,7 +183,7 @@ export function getAdminLogInsights() {
   };
 }
 
-export function querySystemLogs({
+export async function querySystemLogs({
   level = '',
   category = '',
   search = '',
@@ -212,16 +211,19 @@ export function querySystemLogs({
   const safeLimit = Math.min(500, Math.max(1, Number(limit) || 100));
   const safeOffset = Math.max(0, Number(offset) || 0);
 
-  const logs = db.prepare(`
-    SELECT * FROM admin_logs ${where}
-    ORDER BY id DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, safeLimit, safeOffset);
+  const logs = await db.all(
+    `SELECT * FROM admin_logs ${where}
+     ORDER BY id DESC
+     LIMIT ? OFFSET ?`,
+    ...params,
+    safeLimit,
+    safeOffset
+  );
 
-  const total = db.prepare(`SELECT COUNT(*) as cnt FROM admin_logs ${where}`).get(...params)?.cnt || 0;
-  const countsByLevel = db.prepare(`SELECT level, COUNT(*) as cnt FROM admin_logs GROUP BY level`).all();
-  const categories = db.prepare(`SELECT DISTINCT category FROM admin_logs ORDER BY category ASC`).all().map(r => r.category);
-  const insights = getAdminLogInsights();
+  const total = (await db.get(`SELECT COUNT(*) as cnt FROM admin_logs ${where}`, ...params))?.cnt || 0;
+  const countsByLevel = await db.all(`SELECT level, COUNT(*) as cnt FROM admin_logs GROUP BY level`);
+  const categories = (await db.all(`SELECT DISTINCT category FROM admin_logs ORDER BY category ASC`)).map(r => r.category);
+  const insights = await getAdminLogInsights();
 
   return { logs, total, countsByLevel, categories, insights };
 }

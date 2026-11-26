@@ -6,9 +6,9 @@ export const academies = {};
 /**
  * Loads all academies from database academies table into the memory cache
  */
-export function loadAcademies() {
+export async function loadAcademies() {
   try {
-    const rows = db.prepare('SELECT * FROM academies').all();
+    const rows = await db.all('SELECT * FROM academies');
     // Clear current keys in-place to keep references intact
     for (const key in academies) {
       delete academies[key];
@@ -33,6 +33,3 @@ export function loadAcademies() {
     console.error('Error loading academies:', e);
   }
 }
-
-// Initial load on startup
-loadAcademies();

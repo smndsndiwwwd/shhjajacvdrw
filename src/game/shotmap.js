@@ -526,10 +526,10 @@ export function getShotById(shotId) {
  * Gets the player's equipped shot for a specific combination.
  * Checks SQLite table `player_shot_presets`. If none equipped, returns default.
  */
-export function getPlayerEquippedShot(playerId, footwork, intent, zone) {
+export async function getPlayerEquippedShot(playerId, footwork, intent, zone) {
   const comboKey = getComboKey(footwork, intent, zone);
   try {
-    const row = db.prepare('SELECT shot_id FROM player_shot_presets WHERE player_id = ? AND combo_key = ?').get(playerId, comboKey);
+    const row = await db.get('SELECT shot_id FROM player_shot_presets WHERE player_id = ? AND combo_key = ?', playerId, comboKey);
     if (row && row.shot_id && SHOTS_BY_ID[row.shot_id]) {
       return SHOTS_BY_ID[row.shot_id];
     }
@@ -542,18 +542,18 @@ export function getPlayerEquippedShot(playerId, footwork, intent, zone) {
 /**
  * Equips a specific shot for a combination in the player's preset.
  */
-export function setPlayerEquippedShot(playerId, footwork, intent, zone, shotId) {
+export async function setPlayerEquippedShot(playerId, footwork, intent, zone, shotId) {
   const comboKey = getComboKey(footwork, intent, zone);
   const shot = getShotById(shotId);
   if (!shot) {
     throw new Error(`Invalid Shot ID: ${shotId}`);
   }
 
-  db.prepare(`
+  await db.run(`
     INSERT INTO player_shot_presets (player_id, combo_key, shot_id)
     VALUES (?, ?, ?)
     ON CONFLICT(player_id, combo_key) DO UPDATE SET shot_id = excluded.shot_id
-  `).run(playerId, comboKey, shotId);
+  `, playerId, comboKey, shotId);
 
   return shot;
 }
@@ -561,9 +561,9 @@ export function setPlayerEquippedShot(playerId, footwork, intent, zone, shotId) 
 /**
  * Get all customized shots for a player
  */
-export function getPlayerCustomPreset(playerId) {
+export async function getPlayerCustomPreset(playerId) {
   try {
-    const rows = db.prepare('SELECT combo_key, shot_id FROM player_shot_presets WHERE player_id = ?').all(playerId);
+    const rows = await db.all('SELECT combo_key, shot_id FROM player_shot_presets WHERE player_id = ?', playerId);
     const map = {};
     for (const r of rows) {
       if (SHOTS_BY_ID[r.shot_id]) {
@@ -580,6 +580,6 @@ export function getPlayerCustomPreset(playerId) {
 /**
  * Reset player preset to defaults
  */
-export function resetPlayerPreset(playerId) {
-  db.prepare('DELETE FROM player_shot_presets WHERE player_id = ?').run(playerId);
+export async function resetPlayerPreset(playerId) {
+  await db.run('DELETE FROM player_shot_presets WHERE player_id = ?', playerId);
 }

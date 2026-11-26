@@ -858,11 +858,11 @@ export function getZoneFielding(fieldPreset = 'Balanced', isPowerplay = false, z
   };
 }
 
-export function getPlayerBattingPosition(player, db = null) {
+export async function getPlayerBattingPosition(player, db = null) {
   let orderSetting = player?.batting_order || 'auto';
   if ((!orderSetting || orderSetting === 'auto') && db && player?.discord_id) {
     try {
-      const ps = db.prepare('SELECT batting_order FROM player_settings WHERE player_id = ?').get(player.discord_id);
+      const ps = await db.get('SELECT batting_order FROM player_settings WHERE player_id = ?', player.discord_id);
       if (ps && ps.batting_order) orderSetting = ps.batting_order;
     } catch (_) {}
   }

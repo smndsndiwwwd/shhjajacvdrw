@@ -22,6 +22,19 @@ export function getClientIp(req) {
 }
 
 export async function parseJsonBody(req) {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object') return req.body;
+    if (typeof req.body === 'string') {
+      if (!req.body.trim()) return {};
+      try {
+        return JSON.parse(req.body);
+      } catch {
+        throw new Error('Invalid JSON body');
+      }
+    }
+  }
+  if (req.readableEnded) return {};
+
   return new Promise((resolve, reject) => {
     let body = '';
     let size = 0;

@@ -11,26 +11,26 @@ export const storyEvents = [
         label: 'Ignore the criticism and stay quiet',
         resultText: 'You keep your head down. Your mental focus improves.',
         effects: { mentality: 3, energy: -5 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET mentality = mentality + 3 WHERE player_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET mentality = mentality + 3 WHERE player_id = ?', playerId);
         }
       },
       {
         label: 'Retaliate on Twitter/Social Media',
         resultText: 'You gain fan popularity and confidence, but state scouts are unimpressed by your outburst.',
         effects: { aggression: 5, confidence: 15, reputation: -15 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET aggression = aggression + 5 WHERE player_id = ?').run(playerId);
-          db.prepare('UPDATE players SET confidence = MIN(100, confidence + 15), reputation = MAX(0, reputation - 15) WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET aggression = aggression + 5 WHERE player_id = ?', playerId);
+          await db.run('UPDATE players SET confidence = MIN(100, confidence + 15), reputation = MAX(0, reputation - 15) WHERE discord_id = ?', playerId);
         }
       },
       {
         label: 'Hit the nets for extra training',
         resultText: 'You burn some sweat. Your technique is sharpened.',
         effects: { technique: 4, energy: -15, xp: 50 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET technique = technique + 4 WHERE player_id = ?').run(playerId);
-          db.prepare('UPDATE players SET energy = MAX(0, energy - 15), xp = xp + 50 WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET technique = technique + 4 WHERE player_id = ?', playerId);
+          await db.run('UPDATE players SET energy = MAX(0, energy - 15), xp = xp + 50 WHERE discord_id = ?', playerId);
         }
       }
     ]
@@ -44,22 +44,24 @@ export const storyEvents = [
         label: 'Sign the sponsorship contract',
         resultText: 'You secure the bag! You get 250 coins and a free grip.',
         effects: { coins: 250 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE players SET coins = coins + 250, sponsor = \'Sponsor Rubber Grip Co.\' WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run("UPDATE players SET coins = coins + 250, sponsor = 'Sponsor Rubber Grip Co.' WHERE discord_id = ?", playerId);
           // Add a grip to inventory
           const gripBonuses = JSON.stringify({ technique: 3 });
-          db.prepare(`
-            INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-            VALUES (?, 'sponsor_grip', 'Sponsor Rubber Grip', 'Grip', 'Common', ?, 0)
-          `).run(playerId, gripBonuses);
+          await db.run(
+            `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+             VALUES (?, 'sponsor_grip', 'Sponsor Rubber Grip', 'Grip', 'Common', ?, 0)`,
+            playerId,
+            gripBonuses
+          );
         }
       },
       {
         label: 'Decline and wait for major brands',
         resultText: 'You hold out. Your reputation as a serious cricketer increases.',
         effects: { reputation: 25 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE players SET reputation = reputation + 25 WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE players SET reputation = reputation + 25 WHERE discord_id = ?', playerId);
         }
       }
     ]
@@ -73,18 +75,18 @@ export const storyEvents = [
         label: 'Apologize and follow his instructions',
         resultText: 'The coach is pleased. You receive a training boost token.',
         effects: { training_tokens: 1, defense: 2 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE players SET training_tokens = training_tokens + 1 WHERE discord_id = ?').run(playerId);
-          db.prepare('UPDATE attributes SET defense = defense + 2 WHERE player_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE players SET training_tokens = training_tokens + 1 WHERE discord_id = ?', playerId);
+          await db.run('UPDATE attributes SET defense = defense + 2 WHERE player_id = ?', playerId);
         }
       },
       {
         label: 'Argue your case for attacking cricket',
         resultText: 'You show conviction. Your power increases, but your squad selection rating takes a slight hit.',
         effects: { power: 4, form: -10 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET power = power + 4 WHERE player_id = ?').run(playerId);
-          db.prepare('UPDATE players SET form = MAX(0, form - 10) WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET power = power + 4 WHERE player_id = ?', playerId);
+          await db.run('UPDATE players SET form = MAX(0, form - 10) WHERE discord_id = ?', playerId);
         }
       }
     ]
@@ -98,18 +100,18 @@ export const storyEvents = [
         label: 'Rest and miss the next practice session',
         resultText: 'You recover fully. Fitness XP is earned from rehabilitation.',
         effects: { fitness: 2, energy: 20 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET fitness = fitness + 2 WHERE player_id = ?').run(playerId);
-          db.prepare('UPDATE players SET energy = MIN(100, energy + 20) WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET fitness = fitness + 2 WHERE player_id = ?', playerId);
+          await db.run('UPDATE players SET energy = MIN(100, energy + 20) WHERE discord_id = ?', playerId);
         }
       },
       {
         label: 'Take pain killers and push through',
         resultText: 'Risky! You complete the session, but your stamina attributes suffer long-term.',
         effects: { stamina: -3, training_tokens: 2 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET stamina = MAX(10, stamina - 3) WHERE player_id = ?').run(playerId);
-          db.prepare('UPDATE players SET training_tokens = training_tokens + 2 WHERE discord_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET stamina = MAX(10, stamina - 3) WHERE player_id = ?', playerId);
+          await db.run('UPDATE players SET training_tokens = training_tokens + 2 WHERE discord_id = ?', playerId);
         }
       }
     ]
@@ -123,17 +125,17 @@ export const storyEvents = [
         label: 'Accept the challenge (Cost: 15 Energy)',
         resultText: 'You smash him! Your confidence rises and you learn to read pace better.',
         effects: { confidence: 15, pace: 4, energy: -15 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE players SET confidence = MIN(100, confidence + 15), energy = MAX(0, energy - 15) WHERE discord_id = ?').run(playerId);
-          db.prepare('UPDATE attributes SET pace = pace + 4 WHERE player_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE players SET confidence = MIN(100, confidence + 15), energy = MAX(0, energy - 15) WHERE discord_id = ?', playerId);
+          await db.run('UPDATE attributes SET pace = pace + 4 WHERE player_id = ?', playerId);
         }
       },
       {
         label: 'Decline to focus on fitness',
         resultText: 'You stick to your schedule. The bowler laughs, but your running speed gets a minor boost.',
         effects: { running: 3 },
-        dbUpdate: (db, playerId) => {
-          db.prepare('UPDATE attributes SET running = running + 3 WHERE player_id = ?').run(playerId);
+        dbUpdate: async (db, playerId) => {
+          await db.run('UPDATE attributes SET running = running + 3 WHERE player_id = ?', playerId);
         }
       }
     ]

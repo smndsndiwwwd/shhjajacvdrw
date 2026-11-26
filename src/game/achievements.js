@@ -113,14 +113,14 @@ export const achievements = {
  * @param {string} playerId Discord ID of player
  * @returns {string[]} List of newly unlocked achievement names
  */
-export function checkAchievements(db, playerId) {
-  const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
+export async function checkAchievements(db, playerId) {
+  const player = await db.get('SELECT * FROM players WHERE discord_id = ?', playerId);
   if (!player) return [];
 
-  const playerStats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-  const currentAchievements = db.prepare('SELECT achievement_key FROM player_achievements WHERE player_id = ?').all(playerId).map(a => a.achievement_key);
+  const playerStats = (await db.get('SELECT * FROM stats WHERE player_id = ?', playerId)) || {};
+  const currentAchievements = (await db.all('SELECT achievement_key FROM player_achievements WHERE player_id = ?', playerId)).map(a => a.achievement_key);
   
-  const skillCount = db.prepare('SELECT COUNT(*) as cnt FROM skills WHERE player_id = ?').get(playerId)?.cnt || 0;
+  const skillCount = (await db.get('SELECT COUNT(*) as cnt FROM skills WHERE player_id = ?', playerId))?.cnt || 0;
   
   const newlyUnlocked = [];
 
@@ -150,7 +150,7 @@ export function checkAchievements(db, playerId) {
         unlocked = true;
       } else if (key === 'beta_tester') {
         // First 250 registrations based on registration timestamp / order
-        const regRank = db.prepare('SELECT COUNT(*) as rank FROM players WHERE created_at <= ?').get(player.created_at || new Date().toISOString())?.rank || 1;
+        const regRank = (await db.get('SELECT COUNT(*) as rank FROM players WHERE created_at <= ?', player.created_at || new Date().toISOString()))?.rank || 1;
         if (regRank <= 250) unlocked = true;
       } else if (key === 'wall') {
         const balls = playerStats.balls || 0;
@@ -160,11 +160,11 @@ export function checkAchievements(db, playerId) {
         if (balls >= 200 && avg >= 40) unlocked = true;
       } else if (key === 'hat_trick_hero') {
         // Checked in match history, if any match has wickets >= 3
-        const bestWickets = db.prepare('SELECT MAX(wickets) as max_w FROM match_history WHERE player_id = ?').get(playerId)?.max_w || 0;
+        const bestWickets = (await db.get('SELECT MAX(wickets) as max_w FROM match_history WHERE player_id = ?', playerId))?.max_w || 0;
         if (bestWickets >= 3) unlocked = true;
       } else if (key === 'fifer') {
         // Checked in match history, if any match has wickets >= 5
-        const bestWickets = db.prepare('SELECT MAX(wickets) as max_w FROM match_history WHERE player_id = ?').get(playerId)?.max_w || 0;
+        const bestWickets = (await db.get('SELECT MAX(wickets) as max_w FROM match_history WHERE player_id = ?', playerId))?.max_w || 0;
         if (bestWickets >= 5) unlocked = true;
       } else if (key === 'goat') {
         if (player.level >= 30 && (playerStats.runs || 0) >= 2000 && skillCount >= 5) unlocked = true;
@@ -172,8 +172,8 @@ export function checkAchievements(db, playerId) {
     }
 
     if (unlocked) {
-      db.prepare('INSERT OR IGNORE INTO player_achievements (player_id, achievement_key) VALUES (?, ?)').run(playerId, key);
-      db.prepare('UPDATE players SET coins = coins + ? WHERE discord_id = ?').run(ach.reward_coins, playerId);
+      await db.run('INSERT OR IGNORE INTO player_achievements (player_id, achievement_key) VALUES (?, ?)', playerId, key);
+      await db.run('UPDATE players SET coins = coins + ? WHERE discord_id = ?', ach.reward_coins, playerId);
       newlyUnlocked.push(ach.name);
     }
   }
@@ -185,12 +185,12 @@ export function checkAchievements(db, playerId) {
  * Retrieves all achievements with player's unlocked status and metadata
  * @param {object} db SQLite Database connection
  * @param {string} playerId Discord ID of player
- * @returns {Array<{key: string, name: string, description: string, reward_coins: number, unlocked: boolean, earned_at: string | null}>}
+ * @returns {Promise<Array<{key: string, name: string, description: string, reward_coins: number, unlocked: boolean, earned_at: string | null}>>}
  */
-export function getPlayerAchievements(db, playerId) {
-  checkAchievements(db, playerId);
+export async function getPlayerAchievements(db, playerId) {
+  await checkAchievements(db, playerId);
 
-  const earnedRows = db.prepare('SELECT achievement_key, earned_at FROM player_achievements WHERE player_id = ?').all(playerId);
+  const earnedRows = await db.all('SELECT achievement_key, earned_at FROM player_achievements WHERE player_id = ?', playerId);
   const earnedMap = new Map();
   for (const r of earnedRows) {
     earnedMap.set(r.achievement_key, r.earned_at);

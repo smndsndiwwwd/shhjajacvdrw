@@ -12,9 +12,9 @@ export const DEFAULT_SETTINGS = {
 /**
  * Fetch or initialize settings for a player.
  */
-export function getPlayerSettings(playerId) {
+export async function getPlayerSettings(playerId) {
   try {
-    const row = db.prepare('SELECT * FROM player_settings WHERE player_id = ?').get(playerId);
+    const row = await db.get('SELECT * FROM player_settings WHERE player_id = ?', playerId);
     if (row) {
       return {
         display_mode: row.display_mode || 'graphic',
@@ -27,10 +27,9 @@ export function getPlayerSettings(playerId) {
     }
 
     // Insert default settings
-    db.prepare(`
-      INSERT INTO player_settings (player_id, display_mode, field_radar, dm_match, commentary_level, mention_ping, batting_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.run(
+      `INSERT INTO player_settings (player_id, display_mode, field_radar, dm_match, commentary_level, mention_ping, batting_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       playerId,
       DEFAULT_SETTINGS.display_mode,
       DEFAULT_SETTINGS.field_radar,
@@ -50,38 +49,37 @@ export function getPlayerSettings(playerId) {
 /**
  * Update a specific setting for a player.
  */
-export function updatePlayerSetting(playerId, key, value) {
+export async function updatePlayerSetting(playerId, key, value) {
   try {
-    getPlayerSettings(playerId);
+    await getPlayerSettings(playerId);
 
     const allowedKeys = ['display_mode', 'field_radar', 'dm_match', 'commentary_level', 'mention_ping', 'batting_order'];
     if (!allowedKeys.includes(key)) {
       throw new Error(`Invalid setting key: ${key}`);
     }
 
-    db.prepare(`UPDATE player_settings SET ${key} = ? WHERE player_id = ?`).run(value, playerId);
+    await db.run(`UPDATE player_settings SET ${key} = ? WHERE player_id = ?`, value, playerId);
     if (key === 'batting_order') {
       try {
-        db.prepare('UPDATE players SET batting_order = ? WHERE discord_id = ?').run(value, playerId);
+        await db.run('UPDATE players SET batting_order = ? WHERE discord_id = ?', value, playerId);
       } catch (e) {}
     }
-    return getPlayerSettings(playerId);
+    return await getPlayerSettings(playerId);
   } catch (err) {
     console.error(`Error updating setting ${key} for ${playerId}:`, err);
-    return getPlayerSettings(playerId);
+    return await getPlayerSettings(playerId);
   }
 }
 
 /**
  * Reset settings back to defaults.
  */
-export function resetPlayerSettings(playerId) {
+export async function resetPlayerSettings(playerId) {
   try {
-    db.prepare(`
-      UPDATE player_settings
-      SET display_mode = ?, field_radar = ?, dm_match = ?, commentary_level = ?, mention_ping = ?, batting_order = ?
-      WHERE player_id = ?
-    `).run(
+    await db.run(
+      `UPDATE player_settings
+       SET display_mode = ?, field_radar = ?, dm_match = ?, commentary_level = ?, mention_ping = ?, batting_order = ?
+       WHERE player_id = ?`,
       DEFAULT_SETTINGS.display_mode,
       DEFAULT_SETTINGS.field_radar,
       DEFAULT_SETTINGS.dm_match,
@@ -91,12 +89,12 @@ export function resetPlayerSettings(playerId) {
       playerId
     );
     try {
-      db.prepare("UPDATE players SET batting_order = 'auto' WHERE discord_id = ?").run(playerId);
+      await db.run("UPDATE players SET batting_order = 'auto' WHERE discord_id = ?", playerId);
     } catch (e) {}
-    return getPlayerSettings(playerId);
+    return await getPlayerSettings(playerId);
   } catch (err) {
     console.error(`Error resetting settings for ${playerId}:`, err);
-    return getPlayerSettings(playerId);
+    return await getPlayerSettings(playerId);
   }
 }
 

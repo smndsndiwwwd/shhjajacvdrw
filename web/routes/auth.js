@@ -15,10 +15,10 @@ export async function handleAuthRoutes(req, res, pathname) {
   const ip = getClientIp(req);
 
   if (pathname === '/api/auth/me' && req.method === 'GET') {
-    const user = getAuthUser(req);
+    const user = await getAuthUser(req);
     if (!user) return sendJson(res, 200, { authenticated: false, user: null });
     const player = user.player_id
-      ? db.prepare('SELECT discord_id, name, level, primary_role FROM players WHERE discord_id = ?').get(user.player_id)
+      ? await db.get('SELECT discord_id, name, level, primary_role FROM players WHERE discord_id = ?', user.player_id)
       : null;
     return sendJson(res, 200, { authenticated: true, user, hasPlayer: Boolean(player), playerSummary: player });
   }
@@ -35,7 +35,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       return sendJson(res, 400, { error: 'Password must be at least 6 characters.' });
     }
 
-    const exists = db.prepare('SELECT id FROM web_users WHERE username = ?').get(username);
+    const exists = await db.get('SELECT id FROM web_users WHERE username = ?', username);
     if (exists) {
       return sendJson(res, 409, { error: 'That username is already taken.' });
     }
@@ -43,15 +43,18 @@ export async function handleAuthRoutes(req, res, pathname) {
     const playerId = `web_${crypto.randomBytes(6).toString('hex')}`;
     const passwordHash = hashPassword(password);
 
-    const info = db.prepare(`
-      INSERT INTO web_users (username, password_hash, role, player_id, last_login)
-      VALUES (?, ?, 'player', ?, datetime('now'))
-    `).run(username, passwordHash, playerId);
+    const info = await db.run(
+      `INSERT INTO web_users (username, password_hash, role, player_id, last_login)
+       VALUES (?, ?, 'player', ?, datetime('now'))`,
+      username,
+      passwordHash,
+      playerId
+    );
 
-    const user = db.prepare('SELECT id, username, role, player_id, created_at, last_login FROM web_users WHERE id = ?').get(info.lastInsertRowid);
-    const token = signSessionToken(user);
+    const user = await db.get('SELECT id, username, role, player_id, created_at, last_login FROM web_users WHERE id = ?', info.lastInsertRowid);
+    const token = await signSessionToken(user);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'AUTH',
       category: 'Auth',
       actor: user.username,
@@ -60,7 +63,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       ip
     });
 
-    return sendJson(res, 201, { user }, { 'Set-Cookie': makeSessionCookieHeader(token) });
+    return sendJson(res, 201, { user }, { 'Set-Cookie': makeSessionCookieHeader(token, req) });
   }
 
   if (pathname === '/api/auth/login' && req.method === 'POST') {
@@ -72,9 +75,9 @@ export async function handleAuthRoutes(req, res, pathname) {
       return sendJson(res, 400, { error: 'Username and password are required.' });
     }
 
-    const row = db.prepare('SELECT * FROM web_users WHERE username = ?').get(username);
+    const row = await db.get('SELECT * FROM web_users WHERE username = ?', username);
     if (!row || !verifyPassword(password, row.password_hash)) {
-      recordSystemLog({
+      await recordSystemLog({
         level: 'WARN',
         category: 'Auth',
         actor: username || 'unknown',
@@ -85,7 +88,7 @@ export async function handleAuthRoutes(req, res, pathname) {
       return sendJson(res, 401, { error: 'Invalid username or password.' });
     }
 
-    db.prepare("UPDATE web_users SET last_login = datetime('now') WHERE id = ?").run(row.id);
+    await db.run("UPDATE web_users SET last_login = datetime('now') WHERE id = ?", row.id);
     const user = {
       id: row.id,
       username: row.username,
@@ -94,9 +97,9 @@ export async function handleAuthRoutes(req, res, pathname) {
       created_at: row.created_at,
       last_login: new Date().toISOString()
     };
-    const token = signSessionToken(user);
+    const token = await signSessionToken(user);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: row.role === 'admin' ? 'ADMIN' : 'AUTH',
       category: 'Auth',
       actor: user.username,
@@ -105,13 +108,13 @@ export async function handleAuthRoutes(req, res, pathname) {
       ip
     });
 
-    return sendJson(res, 200, { user }, { 'Set-Cookie': makeSessionCookieHeader(token) });
+    return sendJson(res, 200, { user }, { 'Set-Cookie': makeSessionCookieHeader(token, req) });
   }
 
   if (pathname === '/api/auth/logout' && req.method === 'POST') {
-    const user = getAuthUser(req);
+    const user = await getAuthUser(req);
     if (user) {
-      recordSystemLog({
+      await recordSystemLog({
         level: 'AUTH',
         category: 'Auth',
         actor: user.username,
@@ -119,7 +122,7 @@ export async function handleAuthRoutes(req, res, pathname) {
         ip
       });
     }
-    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': makeClearCookieHeader() });
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': makeClearCookieHeader(req) });
   }
 
   return false;

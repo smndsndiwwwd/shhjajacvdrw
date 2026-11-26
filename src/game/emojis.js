@@ -5,9 +5,9 @@ const cache = {};
 /**
  * Loads all emojis from database config table into the memory cache
  */
-export function loadEmojis() {
+export async function loadEmojis() {
   try {
-    const rows = db.prepare('SELECT * FROM config').all();
+    const rows = await db.all('SELECT * FROM config');
     for (const row of rows) {
       cache[row.key] = row.value;
     }
@@ -16,16 +16,13 @@ export function loadEmojis() {
   }
 }
 
-// Initial cache load
-loadEmojis();
-
 /**
  * Updates a configuration emoji in both database and cache
  * @param {string} key - Config key
  * @param {string} value - New emoji value
  */
-export function updateEmojiInDb(key, value) {
-  db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
+export async function updateEmojiInDb(key, value) {
+  await db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)', key, value);
   cache[key] = value;
 }
 

@@ -1,15 +1,131 @@
-import Database from 'better-sqlite3';
+import 'dotenv/config';
+import { createClient } from '@libsql/client';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.resolve(__dirname, '../../career.db');
+const localDbPath = path.resolve(__dirname, '../../career.db');
 
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
+const rawUrl = (process.env.TURSO_DATABASE_URL || process.env.LIBSQL_URL || '').trim();
+const authToken = (process.env.TURSO_AUTH_TOKEN || process.env.LIBSQL_AUTH_TOKEN || '').trim() || undefined;
 
-// Initialize database tables
-db.exec(`
+if (process.env.VERCEL && !rawUrl) {
+  console.warn('[DB] TURSO_DATABASE_URL is not set on Vercel. Persistent storage requires Turso/libSQL.');
+}
+
+const client = createClient(
+  rawUrl
+    ? { url: rawUrl, ...(authToken ? { authToken } : {}) }
+    : { url: pathToFileURL(localDbPath).href }
+);
+
+function normalizeArgs(params) {
+  const flat = params.length === 1 && Array.isArray(params[0]) ? params[0] : params;
+  return flat.map((v) => (v === undefined ? null : v));
+}
+
+function normalizeRow(row, columns) {
+  if (!row) return null;
+  if (Array.isArray(columns) && columns.length > 0) {
+    const obj = {};
+    for (let i = 0; i < columns.length; i++) {
+      const val = row[i] !== undefined ? row[i] : row[columns[i]];
+      obj[columns[i]] = typeof val === 'bigint' ? Number(val) : val;
+    }
+    return obj;
+  }
+  const obj = {};
+  for (const [k, v] of Object.entries(row)) {
+    obj[k] = typeof v === 'bigint' ? Number(v) : v;
+  }
+  return obj;
+}
+
+let initPromise = null;
+
+const db = {
+  client,
+  async get(sql, ...params) {
+    const res = await client.execute({ sql, args: normalizeArgs(params) });
+    if (!res.rows || res.rows.length === 0) return undefined;
+    return normalizeRow(res.rows[0], res.columns);
+  },
+  async all(sql, ...params) {
+    const res = await client.execute({ sql, args: normalizeArgs(params) });
+    return (res.rows || []).map((r) => normalizeRow(r, res.columns));
+  },
+  async run(sql, ...params) {
+    const res = await client.execute({ sql, args: normalizeArgs(params) });
+    return {
+      changes: Number(res.rowsAffected || 0),
+      lastInsertRowid:
+        res.lastInsertRowid !== undefined && res.lastInsertRowid !== null
+          ? Number(res.lastInsertRowid)
+          : 0
+    };
+  },
+  async exec(sql) {
+    await client.executeMultiple(sql);
+  },
+  async transaction(fn) {
+    const tx = await client.transaction('write');
+    const txDb = {
+      async get(sql, ...params) {
+        const res = await tx.execute({ sql, args: normalizeArgs(params) });
+        if (!res.rows || res.rows.length === 0) return undefined;
+        return normalizeRow(res.rows[0], res.columns);
+      },
+      async all(sql, ...params) {
+        const res = await tx.execute({ sql, args: normalizeArgs(params) });
+        return (res.rows || []).map((r) => normalizeRow(r, res.columns));
+      },
+      async run(sql, ...params) {
+        const res = await tx.execute({ sql, args: normalizeArgs(params) });
+        return {
+          changes: Number(res.rowsAffected || 0),
+          lastInsertRowid:
+            res.lastInsertRowid !== undefined && res.lastInsertRowid !== null
+              ? Number(res.lastInsertRowid)
+              : 0
+        };
+      }
+    };
+    try {
+      const result = await fn(txDb);
+      await tx.commit();
+      return result;
+    } catch (err) {
+      try {
+        await tx.rollback();
+      } catch {}
+      throw err;
+    }
+  },
+  async ensureReady() {
+    if (!initPromise) {
+      initPromise = initializeDatabase().catch((err) => {
+        initPromise = null;
+        throw err;
+      });
+    }
+    return initPromise;
+  },
+  async close() {
+    try {
+      client.close();
+    } catch {}
+  }
+};
+
+async function initializeDatabase() {
+  if (!rawUrl) {
+    try {
+      await client.execute('PRAGMA journal_mode = WAL');
+    } catch {}
+  }
+
+  // Initialize database tables
+  await db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     discord_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -263,9 +379,9 @@ db.exec(`
 `);
 
 // Seed default academies if table is empty
-const acadCount = db.prepare('SELECT COUNT(*) as cnt FROM config').get().cnt; // Wait, let's query academies count safely
 try {
-  const acadExists = db.prepare('SELECT COUNT(*) as cnt FROM academies').get().cnt;
+  const acadRow = await db.get('SELECT COUNT(*) as cnt FROM academies');
+  const acadExists = acadRow?.cnt || 0;
   if (acadExists === 0) {
     const defaultAcademies = [
       {
@@ -325,12 +441,23 @@ try {
         success_rate: '68%'
       }
     ];
-    const insertAcad = db.prepare(`
-      INSERT INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
-      VALUES (@id, @name, @rating, @reputation, @history, @specialty, @coach_rating, @training_bonus_text, @bonuses_json, @graduates_domestic, @graduates_international, @success_rate)
-    `);
     for (const acad of defaultAcademies) {
-      insertAcad.run(acad);
+      await db.run(
+        `INSERT INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        acad.id,
+        acad.name,
+        acad.rating,
+        acad.reputation,
+        acad.history,
+        acad.specialty,
+        acad.coach_rating,
+        acad.training_bonus_text,
+        acad.bonuses_json,
+        acad.graduates_domestic,
+        acad.graduates_international,
+        acad.success_rate
+      );
     }
   }
 } catch (e) {
@@ -339,7 +466,8 @@ try {
 
 // Seed default sponsors if table is empty
 try {
-  const sponsorExists = db.prepare('SELECT COUNT(*) as cnt FROM sponsors').get().cnt;
+  const sponsorRow = await db.get('SELECT COUNT(*) as cnt FROM sponsors');
+  const sponsorExists = sponsorRow?.cnt || 0;
   if (sponsorExists === 0) {
     const defaultSponsors = [
       {
@@ -387,12 +515,20 @@ try {
         perk_item_bonuses_json: JSON.stringify({ technique: 4, power: 2, reflex: 3 })
       }
     ];
-    const insertSponsor = db.prepare(`
-      INSERT INTO sponsors (id, name, description, bonus_coins, reputation_required, perk_item_id, perk_item_name, perk_item_type, perk_item_bonuses_json)
-      VALUES (@id, @name, @description, @bonus_coins, @reputation_required, @perk_item_id, @perk_item_name, @perk_item_type, @perk_item_bonuses_json)
-    `);
     for (const sp of defaultSponsors) {
-      insertSponsor.run(sp);
+      await db.run(
+        `INSERT INTO sponsors (id, name, description, bonus_coins, reputation_required, perk_item_id, perk_item_name, perk_item_type, perk_item_bonuses_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sp.id,
+        sp.name,
+        sp.description,
+        sp.bonus_coins,
+        sp.reputation_required,
+        sp.perk_item_id,
+        sp.perk_item_name,
+        sp.perk_item_type,
+        sp.perk_item_bonuses_json
+      );
     }
   }
 } catch (e) {
@@ -418,54 +554,30 @@ const defaults = {
   emoji_wicket: '🚨',
   emoji_match: '🏟️'
 };
-const insertStmt = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)');
 for (const [k, v] of Object.entries(defaults)) {
-  insertStmt.run(k, v);
+  await db.run('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)', k, v);
 }
 
-// Run migration to add sponsor column if it does not exist
-try {
-  db.exec("ALTER TABLE players ADD COLUMN sponsor TEXT DEFAULT 'None'");
-} catch (e) {
-  // Ignore error if column already exists
+// Run column migrations safely
+const alterMigrations = [
+  "ALTER TABLE players ADD COLUMN sponsor TEXT DEFAULT 'None'",
+  "ALTER TABLE players ADD COLUMN last_challenge_timestamp INTEGER DEFAULT 0",
+  "ALTER TABLE players ADD COLUMN batting_order TEXT DEFAULT NULL",
+  "ALTER TABLE player_settings ADD COLUMN batting_order TEXT DEFAULT 'auto'",
+  "ALTER TABLE player_franchise ADD COLUMN dismissals INTEGER DEFAULT 0",
+  "ALTER TABLE player_franchise ADD COLUMN matches_played INTEGER DEFAULT 0",
+  "ALTER TABLE players ADD COLUMN franchise_titles INTEGER DEFAULT 0"
+];
+for (const stmt of alterMigrations) {
+  try {
+    await db.run(stmt);
+  } catch {
+    // Ignore if column already exists
+  }
 }
 
-// Run migration to add last_challenge_timestamp column if it does not exist
-try {
-  db.exec("ALTER TABLE players ADD COLUMN last_challenge_timestamp INTEGER DEFAULT 0");
-} catch (e) {
-  // Ignore error if column already exists
-}
-
-// Run migration to add batting_order column to players table
-try {
-  db.exec("ALTER TABLE players ADD COLUMN batting_order TEXT DEFAULT NULL");
-} catch (e) {
-  // Ignore error if column already exists
-}
-
-// Run migration to add batting_order column to player_settings table
-try {
-  db.exec("ALTER TABLE player_settings ADD COLUMN batting_order TEXT DEFAULT 'auto'");
-} catch (e) {
-  // Ignore error if column already exists
-}
-
-// Run migration to add dismissals and matches_played to player_franchise table
-try {
-  db.exec("ALTER TABLE player_franchise ADD COLUMN dismissals INTEGER DEFAULT 0");
-} catch (e) {
-  // Ignore error if column already exists
-}
-
-try {
-  db.exec("ALTER TABLE player_franchise ADD COLUMN matches_played INTEGER DEFAULT 0");
-} catch (e) {
-  // Ignore error if column already exists
-}
-
-// Create challenge_stats table
-db.exec(`
+// Create secondary tables and indexes
+await db.exec(`
   CREATE TABLE IF NOT EXISTS challenge_stats (
     player_id TEXT PRIMARY KEY,
     played INTEGER DEFAULT 0,
@@ -477,17 +589,7 @@ db.exec(`
     sixes INTEGER DEFAULT 0,
     FOREIGN KEY(player_id) REFERENCES players(discord_id) ON DELETE CASCADE
   );
-`);
 
-// Populate challenge_stats for any existing players
-try {
-  db.exec("INSERT OR IGNORE INTO challenge_stats (player_id) SELECT discord_id FROM players");
-} catch (e) {
-  console.error("Error populating challenge_stats:", e);
-}
-
-// Create custom_items table
-db.exec(`
   CREATE TABLE IF NOT EXISTS custom_items (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -496,10 +598,7 @@ db.exec(`
     cost INTEGER NOT NULL,
     bonuses_json TEXT NOT NULL
   );
-`);
 
-// Create player_shot_presets table
-db.exec(`
   CREATE TABLE IF NOT EXISTS player_shot_presets (
     player_id TEXT NOT NULL,
     combo_key TEXT NOT NULL,
@@ -507,17 +606,7 @@ db.exec(`
     PRIMARY KEY (player_id, combo_key),
     FOREIGN KEY(player_id) REFERENCES players(discord_id) ON DELETE CASCADE
   );
-`);
 
-// Add franchise_titles migration if missing from existing database
-try {
-  db.exec("ALTER TABLE players ADD COLUMN franchise_titles INTEGER DEFAULT 0;");
-} catch (e) {
-  // Column already exists
-}
-
-// Web Authentication, System Audit Logs, and Web PvP Challenges
-db.exec(`
   CREATE TABLE IF NOT EXISTS web_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -555,38 +644,53 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS web_active_matches (
+    player_id TEXT PRIMARY KEY,
+    match_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `);
 
 try {
-  db.exec("ALTER TABLE web_challenges ADD COLUMN expires_at INTEGER DEFAULT 0");
+  await db.run("INSERT OR IGNORE INTO challenge_stats (player_id) SELECT discord_id FROM players");
 } catch (e) {
-  // Ignore if column already exists
+  console.error("Error populating challenge_stats:", e);
 }
+
+const extraMigrations = [
+  "ALTER TABLE web_challenges ADD COLUMN expires_at INTEGER DEFAULT 0",
+  "ALTER TABLE players ADD COLUMN public_id TEXT",
+  "ALTER TABLE players ADD COLUMN avatar_url TEXT DEFAULT NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_players_public_id ON players(public_id)"
+];
+for (const stmt of extraMigrations) {
+  try {
+    await db.run(stmt);
+  } catch {
+    // Ignore if already exists
+  }
+}
+
 try {
-  db.exec("UPDATE web_challenges SET status = 'expired', updated_at = datetime('now') WHERE status IN ('pending', 'active') AND (expires_at = 0 OR expires_at IS NULL) AND updated_at < datetime('now', '-30 minutes')");
-} catch (e) {
+  await db.run("UPDATE web_challenges SET status = 'expired', updated_at = datetime('now') WHERE status IN ('pending', 'active') AND (expires_at = 0 OR expires_at IS NULL) AND updated_at < datetime('now', '-30 minutes')");
+} catch {
   // Ignore startup sweep errors
 }
 
-// Unique human-readable Player ID (e.g., CA-1001) + custom avatar_url migration + backfill
+// Backfill any existing players missing a unique public_id
 try {
-  db.exec("ALTER TABLE players ADD COLUMN public_id TEXT");
+  const missing = await db.all("SELECT discord_id FROM players WHERE public_id IS NULL OR public_id = '' ORDER BY rowid ASC");
+  for (const row of missing) {
+    await db.run("UPDATE players SET public_id = ? WHERE discord_id = ?", await generateUniquePublicId(db), row.discord_id);
+  }
 } catch (e) {
-  // Ignore if column already exists
+  console.error('Error backfilling public_id:', e);
 }
-try {
-  db.exec("ALTER TABLE players ADD COLUMN avatar_url TEXT DEFAULT NULL");
-} catch (e) {
-  // Ignore if column already exists
-}
-try {
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_public_id ON players(public_id)");
-} catch (e) {
-  // Ignore if index creation conflicts temporarily
 }
 
-export function generateUniquePublicId(database = db) {
-  const rows = database.prepare("SELECT public_id FROM players WHERE public_id IS NOT NULL AND public_id != ''").all();
+export async function generateUniquePublicId(database = db) {
+  const rows = await database.all("SELECT public_id FROM players WHERE public_id IS NOT NULL AND public_id != ''");
   let maxNum = 1000;
   const used = new Set();
   for (const r of rows) {
@@ -606,26 +710,15 @@ export function generateUniquePublicId(database = db) {
   return candidate;
 }
 
-// Backfill any existing players missing a unique public_id
-try {
-  const missing = db.prepare("SELECT discord_id FROM players WHERE public_id IS NULL OR public_id = '' ORDER BY rowid ASC").all();
-  if (missing.length > 0) {
-    const upd = db.prepare("UPDATE players SET public_id = ? WHERE discord_id = ?");
-    for (const row of missing) {
-      upd.run(generateUniquePublicId(db), row.discord_id);
-    }
-  }
-} catch (e) {
-  console.error('Error backfilling public_id:', e);
-}
-
-export function resolvePlayerByIdentifier(database, identifier) {
+export async function resolvePlayerByIdentifier(database, identifier) {
   const raw = String(identifier || '').trim();
   if (!raw) return null;
   const cleanedTag = raw.replace(/^#/, '').toUpperCase();
-  return database.prepare(
-    "SELECT * FROM players WHERE discord_id = ? OR UPPER(public_id) = ?"
-  ).get(raw, cleanedTag) || null;
+  return (await database.get(
+    "SELECT * FROM players WHERE discord_id = ? OR UPPER(public_id) = ?",
+    raw,
+    cleanedTag
+  )) || null;
 }
 
 function editDistance(a, b) {
@@ -645,16 +738,16 @@ function editDistance(a, b) {
   return dp[la][lb];
 }
 
-export function searchPlayersDirectory(database, queryStr = '', limit = 30) {
+export async function searchPlayersDirectory(database, queryStr = '', limit = 30) {
   const q = String(queryStr || '').trim();
-  const rows = database.prepare(`
+  const rows = await database.all(`
     SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, p.nationality,
            p.reputation, p.current_chapter, p.batting_hand, p.bowling_style, p.avatar_url,
            COALESCE(s.matches, 0) as matches, COALESCE(s.runs, 0) as runs, COALESCE(s.wickets, 0) as wickets
     FROM players p
     LEFT JOIN stats s ON s.player_id = p.discord_id
     ORDER BY p.level DESC, p.reputation DESC
-  `).all();
+  `);
 
   if (!q) return rows.slice(0, limit).map(r => ({ ...r, matchScore: 100 }));
 

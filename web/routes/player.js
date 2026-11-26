@@ -44,8 +44,8 @@ const SUPPORTED_NATIONS = [
   'New Zealand', 'West Indies', 'Sri Lanka', 'Bangladesh', 'Afghanistan'
 ];
 
-function getPlayerOrFail(res, user) {
-  const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(user.player_id);
+async function getPlayerOrFail(res, user) {
+  const player = await db.get('SELECT * FROM players WHERE discord_id = ?', user.player_id);
   if (!player) {
     sendJson(res, 404, { error: 'No career profile found. Create your cricketer first.' });
     return null;
@@ -54,7 +54,7 @@ function getPlayerOrFail(res, user) {
 }
 
 export async function handlePlayerRoutes(req, res, pathname, query) {
-  const user = getAuthUser(req);
+  const user = await getAuthUser(req);
   if (!user) {
     sendJson(res, 401, { error: 'Unauthorized. Please log in.' });
     return true;
@@ -64,7 +64,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Bootstrap full state
   if (pathname === '/api/bootstrap' && req.method === 'GET') {
-    const player = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId);
+    const player = await db.get('SELECT * FROM players WHERE discord_id = ?', playerId);
     if (!player) {
       return sendJson(res, 200, {
         user,
@@ -73,30 +73,31 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       });
     }
 
-    const energy = updateAndGetEnergy(db, playerId);
+    const energy = await updateAndGetEnergy(db, playerId);
     player.energy = energy;
     const tier = getPlayerTier(player.level);
     const reqXP = getLevelRequiredXP(player.level);
-    const baseAttributes = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(playerId) || {};
-    const effectiveAttributes = getEffectiveAttributes(db, playerId);
-    const equipmentBonuses = getEquipmentBonuses(db, playerId);
-    const unlockedSkills = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
-    const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-    const breakdown = getPlayerModeStatsBreakdown(db, playerId);
+    const baseAttributes = (await db.get('SELECT * FROM attributes WHERE player_id = ?', playerId)) || {};
+    const effectiveAttributes = await getEffectiveAttributes(db, playerId);
+    const equipmentBonuses = await getEquipmentBonuses(db, playerId);
+    const unlockedSkills = (await db.all('SELECT skill_key FROM skills WHERE player_id = ?', playerId)).map(r => r.skill_key);
+    const stats = (await db.get('SELECT * FROM stats WHERE player_id = ?', playerId)) || {};
+    const breakdown = await getPlayerModeStatsBreakdown(db, playerId);
     const computedStats = breakdown.overall;
     const modeStats = breakdown.modes;
-    const settings = getPlayerSettings(playerId);
-    const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
-    const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(playerId);
-    const activeTournament = db.prepare("SELECT * FROM active_tournament_run WHERE player_id = ? AND status = 'active'").get(playerId);
-    const franchise = db.prepare('SELECT * FROM player_franchise WHERE player_id = ?').get(playerId);
-    const inventory = db.prepare('SELECT * FROM inventory WHERE player_id = ?').all(playerId).map(i => ({
+    const settings = await getPlayerSettings(playerId);
+    const activeContract = await db.get('SELECT * FROM contracts WHERE player_id = ? AND active = 1', playerId);
+    const tournamentsWon = await db.all('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0', playerId);
+    const activeTournament = await db.get("SELECT * FROM active_tournament_run WHERE player_id = ? AND status = 'active'", playerId);
+    const franchise = await db.get('SELECT * FROM player_franchise WHERE player_id = ?', playerId);
+    const invRows = await db.all('SELECT * FROM inventory WHERE player_id = ?', playerId);
+    const inventory = invRows.map(i => ({
       ...i,
       bonuses: JSON.parse(i.bonuses || '{}')
     }));
-    loadAcademies();
-    const academy = academies[player.academy_id] || db.prepare('SELECT * FROM academies WHERE id = ?').get(player.academy_id) || null;
-    const achList = getPlayerAchievements(db, playerId);
+    await loadAcademies();
+    const academy = academies[player.academy_id] || (await db.get('SELECT * FROM academies WHERE id = ?', player.academy_id)) || null;
+    const achList = await getPlayerAchievements(db, playerId);
 
     return sendJson(res, 200, {
       user,
@@ -126,16 +127,17 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   // Nation Academies directory
   if (pathname === '/api/academies' && req.method === 'GET') {
     const nation = query.get('nation') || 'India';
-    const list = generateAcademiesForNation(nation).map(ac => {
-      const enrolled = db.prepare('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?').get(ac.id)?.cnt || 0;
+    const baseList = generateAcademiesForNation(nation);
+    const list = await Promise.all(baseList.map(async ac => {
+      const enrolled = (await db.get('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?', ac.id))?.cnt || 0;
       return { ...ac, enrolled, capacity: 40 };
-    });
+    }));
     return sendJson(res, 200, { nation, academies: list, nations: SUPPORTED_NATIONS });
   }
 
   // Begin Career
   if (pathname === '/api/career/begin' && req.method === 'POST') {
-    const existing = db.prepare('SELECT discord_id FROM players WHERE discord_id = ?').get(playerId);
+    const existing = await db.get('SELECT discord_id FROM players WHERE discord_id = ?', playerId);
     if (existing) return sendJson(res, 409, { error: 'You already have an active career.' });
 
     const body = await parseJsonBody(req);
@@ -163,54 +165,55 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const academy = nationList.find(a => a.id === academyId);
     if (!academy) return sendJson(res, 400, { error: 'Selected academy not found for this nationality.' });
 
-    const enrolled = db.prepare('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?').get(academyId)?.cnt || 0;
+    const enrolled = (await db.get('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?', academyId))?.cnt || 0;
     if (enrolled >= 40) return sendJson(res, 400, { error: 'That academy is full (40/40 players).' });
 
-    db.prepare(`
-      INSERT OR REPLACE INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.run(
+      `INSERT OR REPLACE INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       academy.id, academy.name, academy.rating, academy.reputation, academy.history,
       academy.specialty, academy.coachRating, academy.trainingBonusText,
       JSON.stringify(academy.bonuses), academy.graduatesDomestic, academy.graduatesInternational, academy.successRate
     );
-    loadAcademies();
+    await loadAcademies();
 
     const now = Date.now();
-    const publicId = generateUniquePublicId(db);
-    db.prepare(`
-      INSERT INTO players (discord_id, public_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(playerId, publicId, name, battingHand, bowlingStyle, primaryRole, nationality, academyId, now);
+    const publicId = await generateUniquePublicId(db);
+    await db.run(
+      `INSERT INTO players (discord_id, public_id, name, batting_hand, bowling_style, primary_role, nationality, academy_id, last_energy_update, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      playerId, publicId, name, battingHand, bowlingStyle, primaryRole, nationality, academyId, now
+    );
 
     const attrs = generateStartingAttributes(primaryRole, bowlingStyle);
-    db.prepare(`
-      INSERT INTO attributes (
-        player_id, power, timing, technique, spin, pace, fitness, mentality, aggression, defense,
-        running, fielding, reflex, throw_accuracy, swing, seam, spin_bowling, accuracy, variations, stamina
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.run(
+      `INSERT INTO attributes (
+         player_id, power, timing, technique, spin, pace, fitness, mentality, aggression, defense,
+         running, fielding, reflex, throw_accuracy, swing, seam, spin_bowling, accuracy, variations, stamina
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       playerId,
       attrs.power, attrs.timing, attrs.technique, attrs.spin, attrs.pace,
       attrs.fitness, attrs.mentality, attrs.aggression, attrs.defense,
       attrs.running, attrs.fielding, attrs.reflex, attrs.throw_accuracy,
       attrs.swing, attrs.seam, attrs.spin_bowling, attrs.accuracy, attrs.variations, attrs.stamina
     );
-    db.prepare('INSERT INTO stats (player_id) VALUES (?)').run(playerId);
-    db.prepare('INSERT INTO challenge_stats (player_id) VALUES (?)').run(playerId);
+    await db.run('INSERT INTO stats (player_id) VALUES (?)', playerId);
+    await db.run('INSERT INTO challenge_stats (player_id) VALUES (?)', playerId);
 
-    db.prepare(`
-      INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-      VALUES (?, 'club_willow', 'Club Willow Bat', 'Bat', 'Common', ?, 1)
-    `).run(playerId, JSON.stringify({ power: 1, timing: 1 }));
-    db.prepare(`
-      INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-      VALUES (?, 'club_shoes', 'Academy Running Shoes', 'Shoes', 'Common', ?, 1)
-    `).run(playerId, JSON.stringify({ running: 1 }));
+    await db.run(
+      `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+       VALUES (?, 'club_willow', 'Club Willow Bat', 'Bat', 'Common', ?, 1)`,
+      playerId, JSON.stringify({ power: 1, timing: 1 })
+    );
+    await db.run(
+      `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+       VALUES (?, 'club_shoes', 'Academy Running Shoes', 'Shoes', 'Common', ?, 1)`,
+      playerId, JSON.stringify({ running: 1 })
+    );
 
-    const xpRes = addXP(db, playerId, 0);
+    const xpRes = await addXP(db, playerId, 0);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'INFO',
       category: 'Career',
       actor: user.username,
@@ -225,10 +228,10 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Retire Career
   if (pathname === '/api/career/retire' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    db.prepare('DELETE FROM players WHERE discord_id = ?').run(playerId);
-    recordSystemLog({
+    await db.run('DELETE FROM players WHERE discord_id = ?', playerId);
+    await recordSystemLog({
       level: 'WARN',
       category: 'Career',
       actor: user.username,
@@ -242,7 +245,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Switch Academy
   if (pathname === '/api/academy/switch' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const nation = String(body.nationality || player.nationality);
@@ -251,21 +254,20 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const academy = list.find(a => a.id === academyId);
     if (!academy) return sendJson(res, 400, { error: 'Academy not found.' });
 
-    const enrolled = db.prepare('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?').get(academyId)?.cnt || 0;
+    const enrolled = (await db.get('SELECT COUNT(*) as cnt FROM players WHERE academy_id = ?', academyId))?.cnt || 0;
     if (enrolled >= 40) return sendJson(res, 400, { error: 'Academy is currently full (40/40).' });
 
-    db.prepare(`
-      INSERT OR REPLACE INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await db.run(
+      `INSERT OR REPLACE INTO academies (id, name, rating, reputation, history, specialty, coach_rating, training_bonus_text, bonuses_json, graduates_domestic, graduates_international, success_rate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       academy.id, academy.name, academy.rating, academy.reputation, academy.history,
       academy.specialty, academy.coachRating, academy.trainingBonusText,
       JSON.stringify(academy.bonuses), academy.graduatesDomestic, academy.graduatesInternational, academy.successRate
     );
-    loadAcademies();
-    db.prepare('UPDATE players SET academy_id = ? WHERE discord_id = ?').run(academyId, playerId);
+    await loadAcademies();
+    await db.run('UPDATE players SET academy_id = ? WHERE discord_id = ?', academyId, playerId);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'INFO',
       category: 'Academy',
       actor: user.username,
@@ -278,7 +280,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Chapters roadmap
   if (pathname === '/api/chapters' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const list = getPlayerChapters(player, db).map(ch => {
       let reqLevel = 1, reqRep = 0, tier = 'Academy';
@@ -304,14 +306,14 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Training Status (bars, daily session caps, level attribute cap)
   if (pathname === '/api/train/status' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    return sendJson(res, 200, getTrainingStatus(db, player));
+    return sendJson(res, 200, await getTrainingStatus(db, player));
   }
 
   // Training
   if (pathname === '/api/train' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const regime = String(body.regime || '');
@@ -319,30 +321,30 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       return sendJson(res, 400, { error: 'Invalid training regime.' });
     }
 
-    const energy = updateAndGetEnergy(db, playerId);
+    const energy = await updateAndGetEnergy(db, playerId);
     if (energy < 25) return sendJson(res, 400, { error: `Exhausted! Energy is ${energy}/100 (requires 25).` });
     if (player.training_tokens <= 0) return sendJson(res, 400, { error: 'No Training Tickets left!' });
 
-    loadAcademies();
+    await loadAcademies();
     const bonuses = (academies[player.academy_id]?.bonuses) || {};
     const xpMult = bonuses[regime] || 1.0;
 
     let drillRes;
     try {
-      drillRes = executeTrainingDrill(db, player, regime, xpMult);
+      drillRes = await executeTrainingDrill(db, player, regime, xpMult);
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
     }
 
-    db.prepare('UPDATE players SET training_tokens = training_tokens - 1 WHERE discord_id = ?').run(playerId);
-    consumeEnergy(db, playerId, 25);
+    await db.run('UPDATE players SET training_tokens = training_tokens - 1 WHERE discord_id = ?', playerId);
+    await consumeEnergy(db, playerId, 25);
 
     const xpEarned = Math.round(50 * xpMult);
-    const xpRes = addXP(db, playerId, xpEarned);
-    const updatedPlayer = db.prepare('SELECT * FROM players WHERE discord_id = ?').get(playerId) || player;
-    const trainingStatus = getTrainingStatus(db, updatedPlayer);
+    const xpRes = await addXP(db, playerId, xpEarned);
+    const updatedPlayer = (await db.get('SELECT * FROM players WHERE discord_id = ?', playerId)) || player;
+    const trainingStatus = await getTrainingStatus(db, updatedPlayer);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'INFO',
       category: 'Training',
       actor: user.username,
@@ -357,9 +359,9 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Skills
   if (pathname === '/api/skills' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    const unlocked = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
+    const unlocked = (await db.all('SELECT skill_key FROM skills WHERE player_id = ?', playerId)).map(r => r.skill_key);
     return sendJson(res, 200, {
       skillPoints: player.skill_points,
       unlocked,
@@ -368,14 +370,14 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/skills/unlock' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const key = String(body.skill_key || '');
     const node = skillTree[key];
     if (!node) return sendJson(res, 400, { error: 'Unknown skill.' });
 
-    const unlocked = db.prepare('SELECT skill_key FROM skills WHERE player_id = ?').all(playerId).map(r => r.skill_key);
+    const unlocked = (await db.all('SELECT skill_key FROM skills WHERE player_id = ?', playerId)).map(r => r.skill_key);
     if (unlocked.includes(key)) return sendJson(res, 400, { error: 'Skill already unlocked.' });
     if (node.requires && !unlocked.includes(node.requires)) {
       return sendJson(res, 400, { error: `Requires "${skillTree[node.requires]?.name || node.requires}" first.` });
@@ -384,10 +386,10 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       return sendJson(res, 400, { error: `Requires ${node.cost} Skill Points (you have ${player.skill_points}).` });
     }
 
-    db.prepare('UPDATE players SET skill_points = skill_points - ? WHERE discord_id = ?').run(node.cost, playerId);
-    db.prepare('INSERT INTO skills (player_id, skill_key) VALUES (?, ?)').run(playerId, key);
+    await db.run('UPDATE players SET skill_points = skill_points - ? WHERE discord_id = ?', node.cost, playerId);
+    await db.run('INSERT INTO skills (player_id, skill_key) VALUES (?, ?)', playerId, key);
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'INFO',
       category: 'Skills',
       actor: user.username,
@@ -399,10 +401,10 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Shop & Inventory
   if (pathname === '/api/shop' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    loadCustomItems();
-    const owned = db.prepare('SELECT item_id FROM inventory WHERE player_id = ?').all(playerId).map(i => i.item_id);
+    await loadCustomItems();
+    const owned = (await db.all('SELECT item_id FROM inventory WHERE player_id = ?', playerId)).map(i => i.item_id);
     return sendJson(res, 200, {
       coins: player.coins,
       items: Object.values(shopEquipment).map(item => ({
@@ -413,21 +415,22 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/shop/buy' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    loadCustomItems();
+    await loadCustomItems();
     const body = await parseJsonBody(req);
     const item = shopEquipment[String(body.item_id || '')];
     if (!item) return sendJson(res, 404, { error: 'Item not found.' });
     if (player.coins < item.cost) return sendJson(res, 400, { error: `Not enough coins (costs ${item.cost}, you have ${player.coins}).` });
 
-    db.prepare('UPDATE players SET coins = coins - ? WHERE discord_id = ?').run(item.cost, playerId);
-    db.prepare(`
-      INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-      VALUES (?, ?, ?, ?, ?, ?, 0)
-    `).run(playerId, item.id, item.name, item.type, item.rarity, JSON.stringify(item.bonuses));
+    await db.run('UPDATE players SET coins = coins - ? WHERE discord_id = ?', item.cost, playerId);
+    await db.run(
+      `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      playerId, item.id, item.name, item.type, item.rarity, JSON.stringify(item.bonuses)
+    );
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'ECONOMY',
       category: 'Shop',
       actor: user.username,
@@ -440,27 +443,27 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/inventory/equip' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const invId = Number(body.inventory_id);
-    const item = db.prepare('SELECT * FROM inventory WHERE id = ? AND player_id = ?').get(invId, playerId);
+    const item = await db.get('SELECT * FROM inventory WHERE id = ? AND player_id = ?', invId, playerId);
     if (!item) return sendJson(res, 404, { error: 'Inventory item not found.' });
 
     if (item.equipped) {
-      db.prepare('UPDATE inventory SET equipped = 0 WHERE id = ?').run(invId);
+      await db.run('UPDATE inventory SET equipped = 0 WHERE id = ?', invId);
     } else {
-      db.prepare('UPDATE inventory SET equipped = 0 WHERE player_id = ? AND type = ?').run(playerId, item.type);
-      db.prepare('UPDATE inventory SET equipped = 1 WHERE id = ?').run(invId);
+      await db.run('UPDATE inventory SET equipped = 0 WHERE player_id = ? AND type = ?', playerId, item.type);
+      await db.run('UPDATE inventory SET equipped = 1 WHERE id = ?', invId);
     }
     return sendJson(res, 200, { ok: true });
   }
 
   // Shot Map
   if (pathname === '/api/shotmap' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    const customPreset = getPlayerCustomPreset(playerId);
+    const customPreset = await getPlayerCustomPreset(playerId);
     return sendJson(res, 200, {
       footworkOptions: FOOTWORK_OPTIONS,
       intentOptions: INTENT_OPTIONS,
@@ -471,7 +474,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/shotmap/equip' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const { footwork, intent, zone, shotId } = body;
@@ -480,23 +483,24 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     if (!pool || !pool.find(s => s.id === shotId)) {
       return sendJson(res, 400, { error: 'Invalid shot selection for this combination.' });
     }
-    setPlayerEquippedShot(playerId, footwork, intent, zone, shotId);
+    await setPlayerEquippedShot(playerId, footwork, intent, zone, shotId);
     return sendJson(res, 200, { ok: true, comboKey: key, shotId });
   }
 
   if (pathname === '/api/shotmap/reset' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    resetPlayerPreset(playerId);
+    await resetPlayerPreset(playerId);
     return sendJson(res, 200, { ok: true });
   }
 
   // Club, Contracts, Sponsors, Season
   if (pathname === '/api/club' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(playerId);
-    const sponsors = db.prepare('SELECT * FROM sponsors ORDER BY reputation_required ASC').all().map(sp => ({
+    const activeContract = await db.get('SELECT * FROM contracts WHERE player_id = ? AND active = 1', playerId);
+    const sponsorRows = await db.all('SELECT * FROM sponsors ORDER BY reputation_required ASC');
+    const sponsors = sponsorRows.map(sp => ({
       ...sp,
       perk_item_bonuses: JSON.parse(sp.perk_item_bonuses_json || '{}'),
       unlocked: player.reputation >= sp.reputation_required,
@@ -512,7 +516,7 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/contracts/offers' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     if (player.level < 4) return sendJson(res, 400, { error: 'Reach Level 4 to unlock Club Contract Draft offers.' });
     const baseVal = player.level * 15 + player.reputation * 0.2;
@@ -526,19 +530,20 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/contracts/sign' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const { club, type, salary, term } = body;
     if (!club || !salary || !term) return sendJson(res, 400, { error: 'Missing contract details.' });
 
-    db.prepare('DELETE FROM contracts WHERE player_id = ?').run(playerId);
-    db.prepare(`
-      INSERT INTO contracts (player_id, club_name, contract_type, salary_per_match, term_seasons, remaining_seasons, active)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
-    `).run(playerId, String(club), String(type || 'Local Club'), Number(salary), Number(term), Number(term));
+    await db.run('DELETE FROM contracts WHERE player_id = ?', playerId);
+    await db.run(
+      `INSERT INTO contracts (player_id, club_name, contract_type, salary_per_match, term_seasons, remaining_seasons, active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      playerId, String(club), String(type || 'Local Club'), Number(salary), Number(term), Number(term)
+    );
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'ECONOMY',
       category: 'Contracts',
       actor: user.username,
@@ -551,10 +556,10 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   }
 
   if (pathname === '/api/sponsors/sign' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
-    const sponsor = db.prepare('SELECT * FROM sponsors WHERE id = ?').get(String(body.sponsor_id || ''));
+    const sponsor = await db.get('SELECT * FROM sponsors WHERE id = ?', String(body.sponsor_id || ''));
     if (!sponsor) return sendJson(res, 404, { error: 'Sponsor not found.' });
     if (player.reputation < sponsor.reputation_required) {
       return sendJson(res, 400, { error: `Requires ${sponsor.reputation_required} Reputation.` });
@@ -563,20 +568,23 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       return sendJson(res, 400, { error: 'You are already endorsed by this sponsor.' });
     }
 
-    db.prepare('UPDATE players SET sponsor = ?, coins = coins + ? WHERE discord_id = ?')
-      .run(sponsor.name, sponsor.bonus_coins || 0, playerId);
+    await db.run(
+      'UPDATE players SET sponsor = ?, coins = coins + ? WHERE discord_id = ?',
+      sponsor.name, sponsor.bonus_coins || 0, playerId
+    );
 
     if (sponsor.perk_item_id && sponsor.perk_item_name) {
-      const hasItem = db.prepare('SELECT id FROM inventory WHERE player_id = ? AND item_id = ?').get(playerId, sponsor.perk_item_id);
+      const hasItem = await db.get('SELECT id FROM inventory WHERE player_id = ? AND item_id = ?', playerId, sponsor.perk_item_id);
       if (!hasItem) {
-        db.prepare(`
-          INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
-          VALUES (?, ?, ?, ?, 'Rare', ?, 0)
-        `).run(playerId, sponsor.perk_item_id, sponsor.perk_item_name, sponsor.perk_item_type || 'Grip', sponsor.perk_item_bonuses_json || '{}');
+        await db.run(
+          `INSERT INTO inventory (player_id, item_id, name, type, rarity, bonuses, equipped)
+           VALUES (?, ?, ?, ?, 'Rare', ?, 0)`,
+          playerId, sponsor.perk_item_id, sponsor.perk_item_name, sponsor.perk_item_type || 'Grip', sponsor.perk_item_bonuses_json || '{}'
+        );
       }
     }
 
-    recordSystemLog({
+    await recordSystemLog({
       level: 'ECONOMY',
       category: 'Sponsors',
       actor: user.username,
@@ -590,12 +598,12 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Stats, History, Achievements, Leaderboards
   if (pathname === '/api/stats' && req.method === 'GET') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
-    const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(playerId) || {};
-    const breakdown = getPlayerModeStatsBreakdown(db, playerId);
-    const history = db.prepare('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 40').all(playerId);
-    const achievementsList = getPlayerAchievements(db, playerId);
+    const stats = (await db.get('SELECT * FROM stats WHERE player_id = ?', playerId)) || {};
+    const breakdown = await getPlayerModeStatsBreakdown(db, playerId);
+    const history = await db.all('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 40', playerId);
+    const achievementsList = await getPlayerAchievements(db, playerId);
 
     return sendJson(res, 200, {
       stats,
@@ -609,7 +617,8 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
   // Player Search & Public Profile Inspection (by Name, Similar Name, or Unique Player ID)
   if (pathname === '/api/players/search' && req.method === 'GET') {
     const q = query.get('q') || '';
-    const results = searchPlayersDirectory(db, q, 30).map(r => ({
+    const directory = await searchPlayersDirectory(db, q, 30);
+    const results = directory.map(r => ({
       ...r,
       tier: getPlayerTier(r.level)
     }));
@@ -618,14 +627,14 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   // Update Player Profile Photo
   if (pathname === '/api/player/avatar' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const raw = body.avatar_url == null ? '' : String(body.avatar_url).trim();
 
     if (raw === '') {
-      db.prepare('UPDATE players SET avatar_url = NULL WHERE discord_id = ?').run(playerId);
-      recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Cleared Profile Photo', ip });
+      await db.run('UPDATE players SET avatar_url = NULL WHERE discord_id = ?', playerId);
+      await recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Cleared Profile Photo', ip });
       return sendJson(res, 200, { ok: true, avatar_url: null });
     }
 
@@ -635,14 +644,14 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       return sendJson(res, 400, { error: 'Please upload a valid PNG/JPG/WEBP photo (under 250KB) or provide a valid image URL.' });
     }
 
-    db.prepare('UPDATE players SET avatar_url = ? WHERE discord_id = ?').run(raw, playerId);
-    recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Updated Profile Photo', ip });
+    await db.run('UPDATE players SET avatar_url = ? WHERE discord_id = ?', raw, playerId);
+    await recordSystemLog({ level: 'INFO', category: 'Career', actor: user.username, title: 'Updated Profile Photo', ip });
     return sendJson(res, 200, { ok: true, avatar_url: raw });
   }
 
   // Edit Cricketer Name & Playing Hand in Settings
   if (pathname === '/api/player/rename' && req.method === 'POST') {
-    const player = getPlayerOrFail(res, user);
+    const player = await getPlayerOrFail(res, user);
     if (!player) return true;
     const body = await parseJsonBody(req);
     const nextName = String(body.name || '').trim();
@@ -653,8 +662,8 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
       ? body.batting_hand
       : player.batting_hand;
 
-    db.prepare('UPDATE players SET name = ?, batting_hand = ? WHERE discord_id = ?').run(nextName, nextHand, playerId);
-    recordSystemLog({
+    await db.run('UPDATE players SET name = ?, batting_hand = ? WHERE discord_id = ?', nextName, nextHand, playerId);
+    await recordSystemLog({
       level: 'INFO',
       category: 'Career',
       actor: user.username,
@@ -668,29 +677,30 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
 
   if (pathname === '/api/players/profile' && req.method === 'GET') {
     const identifier = query.get('id') || '';
-    const target = resolvePlayerByIdentifier(db, identifier);
+    const target = await resolvePlayerByIdentifier(db, identifier);
     if (!target) return sendJson(res, 404, { error: 'Player profile not found.' });
 
     const tid = target.discord_id;
     const tier = getPlayerTier(target.level);
     const reqXP = getLevelRequiredXP(target.level);
-    const baseAttributes = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(tid) || {};
-    const effectiveAttributes = getEffectiveAttributes(db, tid);
-    const equipmentBonuses = getEquipmentBonuses(db, tid);
-    const stats = db.prepare('SELECT * FROM stats WHERE player_id = ?').get(tid) || {};
-    const breakdown = getPlayerModeStatsBreakdown(db, tid);
+    const baseAttributes = (await db.get('SELECT * FROM attributes WHERE player_id = ?', tid)) || {};
+    const effectiveAttributes = await getEffectiveAttributes(db, tid);
+    const equipmentBonuses = await getEquipmentBonuses(db, tid);
+    const stats = (await db.get('SELECT * FROM stats WHERE player_id = ?', tid)) || {};
+    const breakdown = await getPlayerModeStatsBreakdown(db, tid);
     const computedStats = breakdown.overall;
     const modeStats = breakdown.modes;
-    const activeContract = db.prepare('SELECT * FROM contracts WHERE player_id = ? AND active = 1').get(tid);
-    const tournamentsWon = db.prepare('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0').all(tid);
-    const inventory = db.prepare('SELECT * FROM inventory WHERE player_id = ? AND equipped = 1').all(tid).map(i => ({
+    const activeContract = await db.get('SELECT * FROM contracts WHERE player_id = ? AND active = 1', tid);
+    const tournamentsWon = await db.all('SELECT tournament_id, won, high_score FROM player_tournaments WHERE player_id = ? AND won > 0', tid);
+    const invRows = await db.all('SELECT * FROM inventory WHERE player_id = ? AND equipped = 1', tid);
+    const inventory = invRows.map(i => ({
       ...i,
       bonuses: JSON.parse(i.bonuses || '{}')
     }));
-    const recentMatches = db.prepare('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 12').all(tid);
-    loadAcademies();
-    const academy = academies[target.academy_id] || db.prepare('SELECT * FROM academies WHERE id = ?').get(target.academy_id) || null;
-    const achList = getPlayerAchievements(db, tid);
+    const recentMatches = await db.all('SELECT * FROM match_history WHERE player_id = ? ORDER BY id DESC LIMIT 12', tid);
+    await loadAcademies();
+    const academy = academies[target.academy_id] || (await db.get('SELECT * FROM academies WHERE id = ?', target.academy_id)) || null;
+    const achList = await getPlayerAchievements(db, tid);
 
     return sendJson(res, 200, {
       player: target,
@@ -716,50 +726,50 @@ export async function handlePlayerRoutes(req, res, pathname, query) {
     const type = query.get('type') || 'level';
     let rows = [];
     if (type === 'runs') {
-      rows = db.prepare(`
+      rows = await db.all(`
         SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, s.runs as score, s.matches
         FROM stats s JOIN players p ON s.player_id = p.discord_id
         ORDER BY s.runs DESC LIMIT 25
-      `).all();
+      `);
     } else if (type === 'wickets') {
-      rows = db.prepare(`
+      rows = await db.all(`
         SELECT p.discord_id, p.public_id, p.name, p.level, p.primary_role, s.wickets as score, s.matches
         FROM stats s JOIN players p ON s.player_id = p.discord_id
         ORDER BY s.wickets DESC LIMIT 25
-      `).all();
+      `);
     } else if (type === 'coins') {
-      rows = db.prepare(`
+      rows = await db.all(`
         SELECT discord_id, public_id, name, level, primary_role, coins as score
         FROM players ORDER BY coins DESC LIMIT 25
-      `).all();
+      `);
     } else if (type === 'pvp') {
-      rows = db.prepare(`
+      rows = await db.all(`
         SELECT p.discord_id, p.public_id, p.name, p.level, cs.won as score, cs.played, cs.runs
         FROM challenge_stats cs JOIN players p ON cs.player_id = p.discord_id
         ORDER BY cs.won DESC, cs.runs DESC LIMIT 25
-      `).all();
+      `);
     } else {
-      rows = db.prepare(`
+      rows = await db.all(`
         SELECT discord_id, public_id, name, level, xp, primary_role, level as score
         FROM players ORDER BY level DESC, xp DESC LIMIT 25
-      `).all();
+      `);
     }
     return sendJson(res, 200, { type, rows });
   }
 
   // Settings
   if (pathname === '/api/settings' && req.method === 'GET') {
-    return sendJson(res, 200, { settings: getPlayerSettings(playerId) });
+    return sendJson(res, 200, { settings: await getPlayerSettings(playerId) });
   }
 
   if (pathname === '/api/settings/update' && req.method === 'POST') {
     const body = await parseJsonBody(req);
-    const updated = updatePlayerSetting(playerId, String(body.key || ''), body.value);
+    const updated = await updatePlayerSetting(playerId, String(body.key || ''), body.value);
     return sendJson(res, 200, { settings: updated });
   }
 
   if (pathname === '/api/settings/reset' && req.method === 'POST') {
-    const updated = resetPlayerSettings(playerId);
+    const updated = await resetPlayerSettings(playerId);
     return sendJson(res, 200, { settings: updated });
   }
 

@@ -48,11 +48,11 @@ function getRegimeAttrs(regime, bowlingStyle = '') {
   return { primary: cfg.primary, secondary: cfg.secondary };
 }
 
-export function getTrainingStatus(db, player) {
+export async function getTrainingStatus(db, player) {
   const playerId = player.discord_id;
   const attrCap = getTrainingCapForLevel(player.level || 1);
-  const currentAttrs = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(playerId) || {};
-  const rows = db.prepare('SELECT * FROM training_progress WHERE player_id = ?').all(playerId);
+  const currentAttrs = (await db.get('SELECT * FROM attributes WHERE player_id = ?', playerId)) || {};
+  const rows = await db.all('SELECT * FROM training_progress WHERE player_id = ?', playerId);
   const today = todayUTC();
   const byRegime = {};
 
@@ -84,7 +84,7 @@ export function getTrainingStatus(db, player) {
   return { attrCap, dailyLimit: TRAINING_DAILY_LIMIT, regimes: byRegime };
 }
 
-export function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
+export async function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
   if (!TRAINING_REGIMES[regime]) {
     throw new Error('Invalid training regime.');
   }
@@ -92,12 +92,15 @@ export function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
   const attrCap = getTrainingCapForLevel(player.level || 1);
   const today = todayUTC();
 
-  let row = db.prepare('SELECT * FROM training_progress WHERE player_id = ? AND regime = ?').get(playerId, regime);
+  let row = await db.get('SELECT * FROM training_progress WHERE player_id = ? AND regime = ?', playerId, regime);
   if (!row) {
-    db.prepare(`
-      INSERT INTO training_progress (player_id, regime, progress, daily_count, last_train_date, total_sessions)
-      VALUES (?, ?, 0, 0, ?, 0)
-    `).run(playerId, regime, today);
+    await db.run(
+      `INSERT INTO training_progress (player_id, regime, progress, daily_count, last_train_date, total_sessions)
+       VALUES (?, ?, 0, 0, ?, 0)`,
+      playerId,
+      regime,
+      today
+    );
     row = { progress: 0, daily_count: 0, last_train_date: today, total_sessions: 0 };
   }
 
@@ -111,7 +114,7 @@ export function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
   const gainPct = Math.min(48, Math.max(24, Math.round((28 + Math.random() * 9) * mult)));
   let nextProgress = prevProgress + gainPct;
 
-  const currentAttrs = db.prepare('SELECT * FROM attributes WHERE player_id = ?').get(playerId) || {};
+  const currentAttrs = (await db.get('SELECT * FROM attributes WHERE player_id = ?', playerId)) || {};
   const { primary, secondary } = getRegimeAttrs(regime, player.bowling_style);
   const orderedCandidates = [...primary, ...secondary];
 
@@ -129,7 +132,7 @@ export function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
       const picked = targetPool[0];
       const curr = Number(currentAttrs[picked] || 10);
       const nextVal = Math.min(attrCap, curr + 1);
-      db.prepare(`UPDATE attributes SET ${picked} = ? WHERE player_id = ?`).run(nextVal, playerId);
+      await db.run(`UPDATE attributes SET ${picked} = ? WHERE player_id = ?`, nextVal, playerId);
       gains.push({ key: picked, from: curr, to: nextVal, delta: 1 });
       nextProgress = Math.max(0, nextProgress - 100);
     } else {
@@ -138,14 +141,19 @@ export function executeTrainingDrill(db, player, regime, bonusMult = 1.0) {
     }
   }
 
-  db.prepare(`
-    UPDATE training_progress
-    SET progress = ?,
-        daily_count = ?,
-        last_train_date = ?,
-        total_sessions = total_sessions + 1
-    WHERE player_id = ? AND regime = ?
-  `).run(nextProgress, dailyUsed + 1, today, playerId, regime);
+  await db.run(
+    `UPDATE training_progress
+     SET progress = ?,
+         daily_count = ?,
+         last_train_date = ?,
+         total_sessions = total_sessions + 1
+     WHERE player_id = ? AND regime = ?`,
+    nextProgress,
+    dailyUsed + 1,
+    today,
+    playerId,
+    regime
+  );
 
   return {
     regime,

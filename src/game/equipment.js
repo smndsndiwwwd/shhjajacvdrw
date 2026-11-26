@@ -172,7 +172,7 @@ export function getItemById(id) {
 
 const originalShopEquipment = { ...shopEquipment };
 
-export function loadCustomItems() {
+export async function loadCustomItems() {
   Object.keys(shopEquipment).forEach(key => {
     if (!originalShopEquipment[key]) {
       delete shopEquipment[key];
@@ -180,7 +180,7 @@ export function loadCustomItems() {
   });
 
   try {
-    const customRows = db.prepare('SELECT * FROM custom_items').all();
+    const customRows = await db.all('SELECT * FROM custom_items');
     customRows.forEach(row => {
       shopEquipment[row.id] = {
         id: row.id,
@@ -195,5 +195,3 @@ export function loadCustomItems() {
     console.error('Error loading custom items from database:', e);
   }
 }
-
-loadCustomItems();
