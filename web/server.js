@@ -37,13 +37,13 @@ export async function ensureAppReady() {
 
 export async function handleWebRequest(req, res, { serveStatic = true } = {}) {
   try {
-    await ensureAppReady();
-
     const parsed = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const pathname = parsed.pathname;
     const query = parsed.searchParams;
 
     if (pathname.startsWith('/api/')) {
+      await ensureAppReady();
+
       if (pathname.startsWith('/api/auth/')) {
         const handled = await handleAuthRoutes(req, res, pathname, query);
         if (handled !== false) return;

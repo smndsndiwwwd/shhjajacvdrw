@@ -97,6 +97,7 @@ export function serveStaticFile(res, publicDir, urlPath, req = null) {
 
   const ext = path.extname(targetPath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const isHead = req?.method === 'HEAD';
 
   if (ext === '.html' && path.basename(targetPath) === 'index.html') {
     let html = fs.readFileSync(targetPath, 'utf8');
@@ -106,14 +107,24 @@ export function serveStaticFile(res, publicDir, urlPath, req = null) {
       const origin = `${proto}://${String(host).split(',')[0].trim()}`;
       html = html.replace(/https:\/\/cricket-ascend\.onrender\.com/g, origin);
     }
+    const buf = Buffer.from(html, 'utf8');
     res.writeHead(200, {
       'Content-Type': contentType,
+      'Content-Length': buf.length,
       'Cache-Control': 'no-cache'
     });
-    res.end(html);
+    res.end(isHead ? undefined : buf);
     return;
   }
 
-  res.writeHead(200, { 'Content-Type': contentType });
+  const stat = fs.statSync(targetPath);
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Length': stat.size
+  });
+  if (isHead) {
+    res.end();
+    return;
+  }
   fs.createReadStream(targetPath).pipe(res);
 }
