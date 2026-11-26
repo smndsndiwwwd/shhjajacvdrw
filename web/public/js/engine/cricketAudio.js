@@ -173,6 +173,24 @@ class CricketAudioEngine {
     src.connect(filter).connect(gain).connect(ctx.destination);
     src.start(now);
   }
+
+  playFireworkBurst() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [0, 0.14, 0.28].forEach((offset, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(520 + i * 180, now + offset);
+      osc.frequency.exponentialRampToValueAtTime(1250 + i * 150, now + offset + 0.14);
+      gain.gain.setValueAtTime(0.08, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.18);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.19);
+    });
+  }
 }
 
 export const cricketAudio = new CricketAudioEngine();

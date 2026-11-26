@@ -152,7 +152,12 @@ export function mountChallengeDuelArena(hostEl, initialDuel, state, { onComplete
       selectedIntent: selIntent || 'Stroke',
       selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
       allowZoneClick: isBatter && batStep === 'zone',
-      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null
+      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null,
+      hud: {
+        score: `${st.runs || 0}/${st.wickets || 0}`,
+        overs: `${Math.floor((st.balls || 0) / 6)}.${(st.balls || 0) % 6}/${st.overs || 1} ov`,
+        target: `TARGET ${st.targetRuns || 15}`
+      }
     });
   };
 

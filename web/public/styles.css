@@ -906,6 +906,7 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   margin-bottom: 10px;
 }
 .arcade-canvas-shell {
+  position: relative;
   width: 100%;
   border-radius: 14px;
   overflow: hidden;
@@ -913,6 +914,94 @@ table.data-table tr:hover td { background: rgba(56, 189, 248, 0.04); }
   background: #04060d;
   box-shadow: inset 0 0 36px rgba(0, 0, 0, 0.65);
   scroll-margin-top: 76px;
+}
+
+/* Broadcast TV Overlay HUD inside 3D Viewport */
+.tv-hud-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px;
+  z-index: 4;
+}
+.tv-hud-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tv-scorebug-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.76rem;
+  color: #f8fafc;
+}
+.tv-badge-live {
+  background: linear-gradient(135deg, #10b981, #0ea5e9);
+  color: #020617;
+  font-weight: 800;
+  font-size: 0.66rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.tv-score-main { font-weight: 800; color: #38bdf8; }
+.tv-score-sub { color: #cbd5e1; }
+.tv-score-target { color: #fbbf24; font-weight: 700; }
+.tv-rule-chip {
+  background: rgba(2, 6, 23, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.tv-callout-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tv-callout-pop {
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: clamp(2rem, 5vw, 3.6rem);
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.92), 0 0 28px currentColor;
+  animation: tvPopBounce 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes tvPopBounce {
+  0% { opacity: 0; transform: scale(0.45) translateY(20px); }
+  16% { opacity: 1; transform: scale(1.12) translateY(0); }
+  28% { transform: scale(1.0) translateY(0); }
+  75% { opacity: 1; transform: scale(1.02) translateY(-10px); }
+  100% { opacity: 0; transform: scale(1.08) translateY(-28px); }
+}
+.tv-flash-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.tv-flash-layer.active {
+  animation: tvFlashFade 0.42s ease-out forwards;
+}
+@keyframes tvFlashFade {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
 }
 .arcade-canvas {
   width: 100%;

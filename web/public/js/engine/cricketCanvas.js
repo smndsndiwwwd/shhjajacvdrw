@@ -1,4 +1,12 @@
+import * as THREE from '../vendor/three.module.js';
 import { cricketAudio } from './cricketAudio.js';
+import { WORLD, buildCricketStadium } from './stadium3d.js';
+import {
+  createStickCricketer,
+  animateBatterRig,
+  animateBowlerRig,
+  animateFielderRig
+} from './characters3d.js';
 
 export const WAGON_ZONES = [
   'Long Off',
@@ -11,9 +19,9 @@ export const WAGON_ZONES = [
   'Long On'
 ];
 
-// World-space horizontal angle around Striker (+wy = toward keeper/south, -wy = toward bowler/north, -wx = screen-right/off-side for RHB)
+// Three.js XZ polar angles: +X = screen-right (Off Side for RHB), -X = screen-left (Leg Side for RHB), -Z = Bowler end
 function getZoneWorldAngle(zone, isLeftHand) {
-  const baseMap = {
+  const rhb = {
     'Long Off':   -1.16,
     'Cover':      -0.44,
     'Point':       0.20,
@@ -23,8 +31,8 @@ function getZoneWorldAngle(zone, isLeftHand) {
     'Mid Wicket': -2.70,
     'Long On':    -1.98
   };
-  const base = baseMap[zone] ?? -0.44;
-  return isLeftHand ? base : Math.PI - base;
+  const base = rhb[zone] ?? -0.44;
+  return isLeftHand ? Math.PI - base : base;
 }
 
 export function angleToZone(rad, isLeftHand) {
@@ -41,13 +49,10 @@ export function angleToZone(rad, isLeftHand) {
   return best;
 }
 
-// Polar world-space fielding templates around center (0, 0) matching cricket zones & Powerplay priorities
 const PRESET_SLOTS = {
   Attacking: [
-    // First 2 are the ONLY allowed deep outfielders in Powerplay
     { ang: -1.18, rFrac: 0.85, deep: true, label: 'Long Off' },
     { ang: -2.68, rFrac: 0.85, deep: true, label: 'Deep MW' },
-    // 7 inner-ring aggressive catchers & ring savers
     { ang: 1.38,  rFrac: 0.24, deep: false, label: 'Slip 1' },
     { ang: 1.18,  rFrac: 0.28, deep: false, label: 'Slip 2' },
     { ang: 0.82,  rFrac: 0.30, deep: false, label: 'Gully' },
@@ -57,28 +62,22 @@ const PRESET_SLOTS = {
     { ang: 2.38,  rFrac: 0.22, deep: false, label: 'Short Leg' }
   ],
   Balanced: [
-    // First 2 stay outside 30-yard circle in Powerplay
     { ang: 2.94,  rFrac: 0.86, deep: true, label: 'D.Square' },
     { ang: -2.70, rFrac: 0.86, deep: true, label: 'D.MidWkt' },
-    // Next 3 stay out in Open Field, pulled inside 30-yd circle in Powerplay
     { ang: -1.96, rFrac: 0.86, deep: true, label: 'Long On' },
     { ang: -1.16, rFrac: 0.86, deep: true, label: 'Long Off' },
     { ang: 0.24,  rFrac: 0.84, deep: true, label: 'D.Point' },
-    // 4 inside-circle anchor fielders
     { ang: 2.08,  rFrac: 0.44, deep: false, label: 'S.Fine' },
     { ang: 1.12,  rFrac: 0.34, deep: false, label: 'Slip' },
     { ang: -0.46, rFrac: 0.45, deep: false, label: 'Cover' },
     { ang: -1.42, rFrac: 0.42, deep: false, label: 'Mid Off' }
   ],
   Defensive: [
-    // First 2 stay out in Powerplay
     { ang: 2.12,  rFrac: 0.87, deep: true, label: 'D.Fine' },
     { ang: 2.94,  rFrac: 0.87, deep: true, label: 'D.Square' },
-    // Next 3 protect boundaries in Open Field, pulled in during PP
     { ang: -2.68, rFrac: 0.87, deep: true, label: 'D.MidWkt' },
     { ang: -1.96, rFrac: 0.87, deep: true, label: 'Long On' },
     { ang: -1.16, rFrac: 0.87, deep: true, label: 'Long Off' },
-    // 4 ring fielders
     { ang: 0.96,  rFrac: 0.48, deep: false, label: '3rd Man' },
     { ang: 0.16,  rFrac: 0.46, deep: false, label: 'Point' },
     { ang: -0.48, rFrac: 0.46, deep: false, label: 'Cover' },
@@ -86,35 +85,10 @@ const PRESET_SLOTS = {
   ]
 };
 
-const R_BOUNDARY = 580;
-const R_RING = 335;
-const PITCH_HALF_LEN = 112;
-const PITCH_HALF_W = 24;
-const STRIKER_Y = 104;
-const BOWLER_Y = -104;
-
 export class CricketArcadeRenderer {
   constructor(canvas, callbacks = {}) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
     this.callbacks = callbacks;
-
-    this.W = 960;
-    this.H = 580;
-
-    // 3D Perspective Broadcast Camera Parameters
-    this.baseCam = { x: 0, y: 1360, z: 980, lookX: 0, lookY: -10, fov: 850 };
-    this.camFocus = { x: 0, y: 0 };
-
-    // 3D Stadium Crowd Tier Rings
-    this.crowd = Array.from({ length: 240 }, (_, i) => {
-      const ang = (i / 240) * Math.PI * 2 + (i % 3) * 0.013;
-      const tier = i % 3;
-      const r = R_BOUNDARY + 62 + tier * 42;
-      const z = 18 + tier * 36;
-      const palette = ['#38bdf8', '#f59e0b', '#10b981', '#f43f5e', '#e2e8f0', '#a855f7'];
-      return { ang, r, z, color: palette[i % palette.length], phase: (i * 0.67) % (Math.PI * 2) };
-    });
 
     this.state = {
       phase: 'batting',
@@ -128,166 +102,462 @@ export class CricketArcadeRenderer {
       selectedZone: null,
       allowZoneClick: false,
       currentBallHint: null,
-      bowlPitchTarget: { line: 'Stumps', length: 'Good Length', wx: 0, wy: 24 }
+      bowlPitchTarget: { line: 'Stumps', length: 'Good Length', wx: 0, wy: 2.0 },
+      hud: null
     };
 
     this.anim = null;
-    this.particles = [];
-    this.trail = [];
-    this.floatingTexts = [];
+    this.hitStopTimer = 0;
     this.cameraShake = 0;
-    this.flashAlpha = 0;
-    this.flashColor = '#ffffff';
-    this.stumpsBroken = false;
-    this.bails = [];
-    this.fielders = [];
     this.crowdExcitement = 0;
+    this.camLook = new THREE.Vector3(0, 0.85, -3.5);
+    this.camPos = new THREE.Vector3(0, 5.2, 22.8);
+    this.trailPoints = [];
+    this.particles = [];
+    this.stumpPhysics = [];
+    this.bailPhysics = [];
+    this.stumpsDislodged = false;
+    this.fielders = [];
     this.rafId = null;
-    this.lastTime = 0;
+    this.destroyed = false;
 
-    this.syncFielders();
+    this.mountHudOverlay();
+
+    try {
+      this.initThree();
+    } catch (err) {
+      console.warn('WebGL unavailable, using 2D fallback:', err.message);
+      this.webglFailed = true;
+      this.initFallback2D();
+    }
+
     this.bindPointer();
     this.startLoop();
   }
 
-  // Exact 3D LookAt Camera Projection (World wx/wy horizontal ground, wz elevation up)
-  computeCameraBasis() {
-    const cx = this.baseCam.x + this.camFocus.x;
-    const cy = this.baseCam.y + this.camFocus.y * 0.25;
-    const cz = this.baseCam.z;
-    const lx = this.baseCam.lookX + this.camFocus.x * 0.45;
-    const ly = this.baseCam.lookY + this.camFocus.y * 0.35;
-    const lz = 0;
+  mountHudOverlay() {
+    const parent = this.canvas?.parentElement;
+    if (!parent) return;
+    parent.style.position = 'relative';
 
-    const fx = lx - cx, fy = ly - cy, fz = lz - cz;
-    const fl = Math.hypot(fx, fy, fz) || 1;
-    const f = [fx / fl, fy / fl, fz / fl];
+    const existing = parent.querySelector('.tv-hud-overlay');
+    if (existing) existing.remove();
 
-    // right = normalize(f x worldUp(0,0,1))
-    let rx = f[1] * 1 - f[2] * 0;
-    let ry = f[2] * 0 - f[0] * 1;
-    let rz = 0;
-    const rl = Math.hypot(rx, ry, rz) || 1;
-    const r = [rx / rl, ry / rl, rz / rl];
-
-    // up = r x f
-    const u = [
-      r[1] * f[2] - r[2] * f[1],
-      r[2] * f[0] - r[0] * f[2],
-      r[0] * f[1] - r[1] * f[0]
-    ];
-
-    return { pos: [cx, cy, cz], f, r, u };
+    const hud = document.createElement('div');
+    hud.className = 'tv-hud-overlay';
+    hud.innerHTML = `
+      <div class="tv-hud-top">
+        <div class="tv-scorebug-pill">
+          <span class="tv-badge-live">3D LIVE</span>
+          <span class="tv-score-main" data-hud="score">--</span>
+          <span class="tv-score-sep">•</span>
+          <span class="tv-score-sub" data-hud="overs">-- ov</span>
+          <span class="tv-score-target" data-hud="target"></span>
+        </div>
+        <div class="tv-rule-chip" data-hud="rule">POWERPLAY</div>
+      </div>
+      <div class="tv-callout-stage" data-hud="callout"></div>
+      <div class="tv-flash-layer" data-hud="flash"></div>
+    `;
+    parent.appendChild(hud);
+    this.hudEl = hud;
+    this.calloutEl = hud.querySelector('[data-hud="callout"]');
+    this.flashEl = hud.querySelector('[data-hud="flash"]');
+    this.syncHudDom();
   }
 
-  project(wx, wy, wz = 0, basis = this._frameBasis) {
-    const b = basis || this.computeCameraBasis();
-    const dx = wx - b.pos[0];
-    const dy = wy - b.pos[1];
-    const dz = wz - b.pos[2];
+  syncHudDom() {
+    if (!this.hudEl) return;
+    const s = this.state;
+    const scoreEl = this.hudEl.querySelector('[data-hud="score"]');
+    const oversEl = this.hudEl.querySelector('[data-hud="overs"]');
+    const targetEl = this.hudEl.querySelector('[data-hud="target"]');
+    const ruleEl = this.hudEl.querySelector('[data-hud="rule"]');
 
-    const cz = dx * b.f[0] + dy * b.f[1] + dz * b.f[2];
-    const cx = dx * b.r[0] + dy * b.r[1] + dz * b.r[2];
-    const cy = dx * b.u[0] + dy * b.u[1] + dz * b.u[2];
+    if (s.hud) {
+      if (scoreEl) scoreEl.textContent = s.hud.score || 'Match Ready';
+      if (oversEl) oversEl.textContent = s.hud.overs || '';
+      if (targetEl) targetEl.textContent = s.hud.target ? `• ${s.hud.target}` : '';
+    } else {
+      if (scoreEl) scoreEl.textContent = s.phase === 'batting' ? 'BATTING' : 'BOWLING';
+      if (oversEl) oversEl.textContent = s.isLeftHand ? 'LHB' : 'RHB';
+      if (targetEl) targetEl.textContent = '';
+    }
 
-    const depth = Math.max(180, cz);
-    const scale = this.baseCam.fov / depth;
-    return {
-      x: this.W * 0.5 + cx * scale,
-      y: this.H * 0.505 - cy * scale,
-      scale,
-      depth: cz
-    };
+    if (ruleEl) {
+      const ruleTxt = s.isPowerplay ? 'POWERPLAY (2 OUT)' : 'OPEN FIELD (5 OUT)';
+      const extra = s.phase === 'batting'
+        ? (s.selectedZone ? ` • AIM: ${String(s.selectedZone).toUpperCase()}` : '')
+        : ` • ${String(s.bowlPitchTarget?.length || 'GOOD').toUpperCase()} (${String(s.bowlPitchTarget?.line || 'STUMPS').toUpperCase()})`;
+      ruleEl.textContent = `${ruleTxt}${extra}`;
+    }
   }
 
-  // Inverse ground intersection ray from screen pixel (sx, sy) onto plane wz = 0
-  unprojectGround(sx, sy) {
-    const b = this.computeCameraBasis();
-    const nx = (sx - this.W * 0.5) / this.baseCam.fov;
-    const ny = (this.H * 0.505 - sy) / this.baseCam.fov;
+  showCallout(text, color = '#fbbf24', flashHex = null) {
+    if (this.calloutEl) {
+      const pop = document.createElement('div');
+      pop.className = 'tv-callout-pop';
+      pop.style.color = color;
+      pop.textContent = text;
+      this.calloutEl.innerHTML = '';
+      this.calloutEl.appendChild(pop);
+      setTimeout(() => {
+        if (pop.parentElement === this.calloutEl) pop.remove();
+      }, 1550);
+    }
+    if (flashHex && this.flashEl) {
+      this.flashEl.style.background = flashHex;
+      this.flashEl.classList.remove('active');
+      void this.flashEl.offsetWidth;
+      this.flashEl.classList.add('active');
+    }
+  }
 
-    const dirX = b.f[0] + b.r[0] * nx + b.u[0] * ny;
-    const dirY = b.f[1] + b.r[1] * nx + b.u[1] * ny;
-    const dirZ = b.f[2] + b.r[2] * nx + b.u[2] * ny;
+  initThree() {
+    const renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+    this.renderer = renderer;
 
-    if (Math.abs(dirZ) < 1e-4) return { wx: 0, wy: 0 };
-    const t = -b.pos[2] / dirZ;
-    return {
-      wx: b.pos[0] + dirX * t,
-      wy: b.pos[1] + dirY * t
-    };
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(44, 960 / 560, 0.4, 340);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
+
+    this.resizeScene();
+    this._ro = new ResizeObserver(() => this.resizeScene());
+    if (this.canvas.parentElement) this._ro.observe(this.canvas.parentElement);
+
+    // 1. 3D Stadium, Pitch, Stands, Crowd, Floodlights & Stumps
+    this.stadium = buildCricketStadium(this.scene);
+
+    // 2. Stylized 3D Characters (Batter, Non-Striker, Bowler, Keeper, 9 Fielders)
+    this.batterRig = createStickCricketer({
+      role: 'batsman',
+      jerseyColor: 0x2563eb,
+      hasHelmet: true,
+      capColor: 0x0f172a,
+      isLeftHand: this.state.isLeftHand
+    });
+    this.batterRig.root.position.set(-1.1, 0, WORLD.STRIKER_Z - 0.8);
+    this.scene.add(this.batterRig.root);
+
+    this.nonStrikerRig = createStickCricketer({
+      role: 'nonstriker',
+      jerseyColor: 0x2563eb,
+      hasHelmet: true,
+      capColor: 0x0f172a
+    });
+    this.nonStrikerRig.root.position.set(1.2, 0, WORLD.BOWLER_Z + 1.4);
+    this.nonStrikerRig.root.rotation.y = Math.PI;
+    this.scene.add(this.nonStrikerRig.root);
+
+    this.bowlerRig = createStickCricketer({
+      role: 'bowler',
+      jerseyColor: 0xe11d48,
+      hasHelmet: false,
+      capColor: 0xbe123c
+    });
+    this.bowlerRig.root.position.set(-1.0, 0, WORLD.BOWLER_Z - 7.5);
+    this.scene.add(this.bowlerRig.root);
+
+    this.keeperRig = createStickCricketer({
+      role: 'keeper',
+      jerseyColor: 0xe11d48,
+      hasHelmet: true,
+      capColor: 0x9f1239
+    });
+    this.keeperRig.root.position.set(0, 0, WORLD.STRIKER_Z + 2.8);
+    this.keeperRig.root.rotation.y = Math.PI;
+    this.keeperRig.torso.rotation.x = 0.42;
+    this.scene.add(this.keeperRig.root);
+
+    for (let i = 0; i < 9; i++) {
+      const fRig = createStickCricketer({
+        role: 'fielder',
+        jerseyColor: 0xe11d48,
+        hasHelmet: false,
+        capColor: 0xbe123c
+      });
+      this.scene.add(fRig.root);
+      this.fielders.push({ rig: fRig, baseX: 0, baseZ: 0, wx: 0, wz: 0, diveT: 0 });
+    }
+
+    // 3. Glossy 3D Cricket Ball + Seam + Ground Drop Shadow + Dynamic Ribbon Trail
+    this.ballGroup = new THREE.Group();
+    const ballMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25, metalness: 0.08 });
+    this.ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 18, 14), ballMat);
+    this.ballMesh.castShadow = true;
+    const seamMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(0.161, 0.02, 6, 20),
+      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+    );
+    this.ballMesh.add(seamMesh);
+    this.ballGroup.add(this.ballMesh);
+    this.ballGroup.visible = false;
+    this.scene.add(this.ballGroup);
+
+    this.ballShadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.24, 14),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.48 })
+    );
+    this.ballShadow.rotation.x = -Math.PI / 2;
+    this.ballShadow.visible = false;
+    this.scene.add(this.ballShadow);
+
+    // Dynamic 3D Trail Line/Ribbon using BufferGeometry
+    this.maxTrail = 28;
+    const trailPos = new Float32Array(this.maxTrail * 3);
+    this.trailGeo = new THREE.BufferGeometry();
+    this.trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    this.trailGeo.setDrawRange(0, 0);
+    this.trailMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.88 });
+    this.trailLine = new THREE.Line(this.trailGeo, this.trailMat);
+    this.trailLine.frustumCulled = false;
+    this.scene.add(this.trailLine);
+
+    // 4. Pitch Length Cue, Bounce Target & Aiming Zone Wedge
+    this.lengthBand = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD.PITCH_W - 0.15, 4.2),
+      new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.32, side: THREE.DoubleSide })
+    );
+    this.lengthBand.rotation.x = -Math.PI / 2;
+    this.lengthBand.position.y = 0.048;
+    this.lengthBand.visible = false;
+    this.scene.add(this.lengthBand);
+
+    this.bounceRing = new THREE.Group();
+    const ringOuter = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.46, 24),
+      new THREE.MeshBasicMaterial({ color: 0xf43f5e, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    );
+    ringOuter.rotation.x = -Math.PI / 2;
+    const ringDot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.18, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfb7185, side: THREE.DoubleSide })
+    );
+    ringDot.rotation.x = -Math.PI / 2;
+    this.bounceRing.add(ringOuter, ringDot);
+    this.bounceRing.position.y = 0.055;
+    this.bounceRing.visible = false;
+    this.scene.add(this.bounceRing);
+
+    this.aimWedge = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
+    );
+    this.aimWedge.visible = false;
+    this.scene.add(this.aimWedge);
+
+    // Shared Particle Pool (Dust + Fireworks + Confetti)
+    this.particleGroup = new THREE.Group();
+    this.scene.add(this.particleGroup);
+    this.particleGeo = new THREE.BoxGeometry(0.18, 0.18, 0.06);
+
+    this.syncFielders();
+    this.applyKitColors();
+  }
+
+  resizeScene() {
+    if (!this.renderer || !this.canvas) return;
+    const parent = this.canvas.parentElement;
+    const w = Math.max(320, parent ? parent.clientWidth : 960);
+    const h = Math.max(230, Math.round(w * (560 / 960)));
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  applyKitColors() {
+    if (!this.batterRig) return;
+    const isBatPhase = this.state.phase === 'batting';
+    const batHex = isBatPhase ? 0x2563eb : 0xe11d48;
+    const fldHex = isBatPhase ? 0xe11d48 : 0x2563eb;
+    const batCap = isBatPhase ? 0x0f172a : 0x9f1239;
+    const fldCap = isBatPhase ? 0xbe123c : 0x1d4ed8;
+    this.batterRig.setColors({ jerseyHex: batHex, capHex: batCap, isLeft: this.state.isLeftHand });
+    this.nonStrikerRig.setColors({ jerseyHex: batHex, capHex: batCap });
+    this.bowlerRig.setColors({ jerseyHex: fldHex, capHex: fldCap });
+    this.keeperRig.setColors({ jerseyHex: fldHex, capHex: batHex === 0x2563eb ? 0x9f1239 : 0x1d4ed8 });
+    this.fielders.forEach(f => f.rig.setColors({ jerseyHex: fldHex, capHex: fldCap }));
   }
 
   updateConfig(cfg) {
     Object.assign(this.state, cfg);
+    if (this.stadium) {
+      this.stadium.setPitchAppearance(this.state.pitch);
+      this.stadium.setPowerplay(Boolean(this.state.isPowerplay));
+    }
+    this.applyKitColors();
     this.syncFielders();
+    this.syncVisualMarkers();
+    this.syncHudDom();
   }
 
   syncFielders() {
+    if (this.fielders.length === 0) return;
     const raw = PRESET_SLOTS[this.state.fieldPreset] || PRESET_SLOTS.Balanced;
     const maxDeep = this.state.isPowerplay ? 2 : 5;
     let deepCount = 0;
 
-    this.fielders = raw.map((slot, idx) => {
-      const ang = this.state.isLeftHand ? slot.ang : Math.PI - slot.ang;
-      let r = slot.rFrac * R_BOUNDARY;
+    raw.forEach((slot, idx) => {
+      const f = this.fielders[idx];
+      if (!f) return;
+      const ang = this.state.isLeftHand ? Math.PI - slot.ang : slot.ang;
+      let r = slot.rFrac * (WORLD.R_BOUNDARY - 1.5);
       if (slot.deep) {
         deepCount++;
-        if (deepCount > maxDeep) {
-          r = R_RING * 0.80; // Pull extra deep fielders strictly inside 30-yd Powerplay circle!
-        }
+        if (deepCount > maxDeep) r = WORLD.R_RING * 0.80;
       }
       let wx = Math.cos(ang) * r;
-      let wy = Math.sin(ang) * r;
-      // Guarantee fielder never stands inside the 22-yard pitch corridor
-      if (Math.abs(wx) < PITCH_HALF_W + 22 && Math.abs(wy) < PITCH_HALF_LEN + 18) {
-        wx += (wx >= 0 ? 1 : -1) * 42;
+      let wz = Math.sin(ang) * r;
+      if (Math.abs(wx) < 3.6 && Math.abs(wz) < 12.2) {
+        wx += (wx >= 0 ? 1 : -1) * 4.2;
       }
-      return { id: idx, baseX: wx, baseY: wy, wx, wy, label: slot.label };
+      f.baseX = wx;
+      f.baseZ = wz;
+      if (!this.anim) {
+        f.wx = wx;
+        f.wz = wz;
+        f.rig.root.position.set(wx, 0, wz);
+        f.rig.root.lookAt(0, 0, WORLD.STRIKER_Z);
+      }
     });
   }
 
-  canvasCoords(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: ((clientX - rect.left) / Math.max(1, rect.width)) * this.W,
-      y: ((clientY - rect.top) / Math.max(1, rect.height)) * this.H
-    };
+  syncVisualMarkers() {
+    if (!this.lengthBand || !this.bounceRing || !this.aimWedge) return;
+    const isIdle = !this.anim;
+
+    if (isIdle && this.state.phase === 'batting') {
+      const hint = this.state.currentBallHint;
+      if (hint?.length) {
+        const lk = String(hint.length).toLowerCase();
+        let zMid = 1.0, lenDepth = 4.5;
+        if (lk.includes('yorker')) { zMid = WORLD.STRIKER_Z - 1.2; lenDepth = 2.6; }
+        else if (lk.includes('full')) { zMid = WORLD.STRIKER_Z - 4.2; lenDepth = 3.8; }
+        else if (lk.includes('short')) { zMid = -4.5; lenDepth = 4.2; }
+        this.lengthBand.scale.set(1, lenDepth / 4.2, 1);
+        this.lengthBand.position.set(0, 0.048, zMid);
+        this.lengthBand.material.color.setHex(hint.fullReveal ? 0x38bdf8 : 0xfbbf24);
+        this.lengthBand.visible = true;
+
+        if (hint.fullReveal && hint.line) {
+          const spot = this.deliveryToWorldPoint(hint);
+          this.bounceRing.position.set(spot.wx, 0.056, spot.wz ?? spot.wy);
+          this.bounceRing.visible = true;
+        } else {
+          this.bounceRing.visible = false;
+        }
+      } else {
+        this.lengthBand.visible = false;
+        this.bounceRing.visible = false;
+      }
+
+      if (this.state.selectedZone) {
+        const ang = getZoneWorldAngle(this.state.selectedZone, this.state.isLeftHand);
+        const dirX = Math.cos(ang), dirZ = Math.sin(ang);
+        const dRope = this.distanceToBoundaryFromStriker(dirX, dirZ) * 0.85;
+        const pts = new Float32Array([
+          0, 0.06, WORLD.STRIKER_Z,
+          Math.cos(ang - 0.32) * dRope, 0.06, WORLD.STRIKER_Z + Math.sin(ang - 0.32) * dRope,
+          Math.cos(ang + 0.32) * dRope, 0.06, WORLD.STRIKER_Z + Math.sin(ang + 0.32) * dRope
+        ]);
+        this.aimWedge.geometry.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        this.aimWedge.geometry.computeVertexNormals();
+        this.aimWedge.visible = true;
+      } else {
+        this.aimWedge.visible = false;
+      }
+    } else if (isIdle && this.state.phase === 'bowling') {
+      this.lengthBand.visible = false;
+      this.aimWedge.visible = false;
+      const pt = this.state.bowlPitchTarget;
+      this.bounceRing.position.set(pt.wx || 0, 0.056, pt.wz ?? pt.wy ?? 2.0);
+      this.bounceRing.visible = true;
+    } else {
+      this.lengthBand.visible = false;
+      this.bounceRing.visible = false;
+      this.aimWedge.visible = false;
+    }
+  }
+
+  deliveryToWorldPoint(deliv) {
+    // Behind-WK view: +X is Off Side for RHB, -X is Leg Side for RHB
+    const sign = this.state.isLeftHand ? -1 : 1;
+    let wx = 0;
+    if (deliv?.line === 'Off Side') wx = 0.95 * sign;
+    else if (deliv?.line === 'Leg Side') wx = -0.95 * sign;
+    else if (deliv?.line === 'Wide') wx = 1.9 * sign;
+
+    let wz = 0.8;
+    const len = String(deliv?.length || '');
+    if (len === 'Yorker') wz = WORLD.STRIKER_Z - 0.9;
+    else if (len === 'Full' || len === 'Full Toss') wz = 5.2;
+    else if (len === 'Short') wz = -4.2;
+    return { wx, wy: wz, wz };
+  }
+
+  distanceToBoundaryFromStriker(dirX, dirZ) {
+    const b = 2 * WORLD.STRIKER_Z * dirZ;
+    const c = WORLD.STRIKER_Z * WORLD.STRIKER_Z - WORLD.R_BOUNDARY * WORLD.R_BOUNDARY;
+    const disc = Math.max(0, b * b - 4 * c);
+    return (-b + Math.sqrt(disc)) / 2;
   }
 
   bindPointer() {
+    this._raycaster = new THREE.Raycaster();
+    this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
     const onDown = (e) => {
-      if (this.anim) return;
+      if (this.anim || this.webglFailed) return;
       cricketAudio.ensureContext();
-      const sc = this.canvasCoords(e);
-      const ground = this.unprojectGround(sc.x, sc.y);
+      const rect = this.canvas.getBoundingClientRect();
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const ndc = new THREE.Vector2(
+        ((cx - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+        -((cy - rect.top) / Math.max(1, rect.height)) * 2 + 1
+      );
+
+      this._raycaster.setFromCamera(ndc, this.camera);
+      const hit = new THREE.Vector3();
+      if (!this._raycaster.ray.intersectPlane(this._groundPlane, hit)) return;
 
       if (this.state.phase === 'batting') {
         if (!this.state.allowZoneClick) return;
-        const ang = Math.atan2(ground.wy - STRIKER_Y, ground.wx);
+        const ang = Math.atan2(hit.z - WORLD.STRIKER_Z, hit.x);
         const zone = angleToZone(ang, this.state.isLeftHand);
         this.state.selectedZone = zone;
+        this.syncVisualMarkers();
+        this.syncHudDom();
         cricketAudio.playUiTick();
         if (this.callbacks.onSelectZone) this.callbacks.onSelectZone(zone);
       } else {
-        const clampedX = Math.max(-44, Math.min(44, ground.wx));
-        const clampedY = Math.max(BOWLER_Y + 18, Math.min(STRIKER_Y - 2, ground.wy));
-
-        const orientedX = clampedX * (this.state.isLeftHand ? 1 : -1);
+        const clampedX = Math.max(-2.4, Math.min(2.4, hit.x));
+        const clampedZ = Math.max(WORLD.BOWLER_Z + 2.0, Math.min(WORLD.STRIKER_Z - 0.3, hit.z));
+        const orientedX = clampedX * (this.state.isLeftHand ? -1 : 1);
         let line = 'Stumps';
-        if (orientedX > 24) line = 'Wide';
-        else if (orientedX > 9) line = 'Off Side';
-        else if (orientedX < -9) line = 'Leg Side';
+        if (orientedX > 1.45) line = 'Wide';
+        else if (orientedX > 0.45) line = 'Off Side';
+        else if (orientedX < -0.45) line = 'Leg Side';
 
-        const yNorm = (clampedY - BOWLER_Y) / Math.max(1, STRIKER_Y - BOWLER_Y);
+        const zNorm = (clampedZ - WORLD.BOWLER_Z) / (WORLD.STRIKER_Z - WORLD.BOWLER_Z);
         let length = 'Good Length';
-        if (yNorm > 0.82) length = 'Yorker';
-        else if (yNorm > 0.60) length = 'Full';
-        else if (yNorm < 0.36) length = 'Short';
+        if (zNorm > 0.82) length = 'Yorker';
+        else if (zNorm > 0.62) length = 'Full';
+        else if (zNorm < 0.36) length = 'Short';
 
-        this.state.bowlPitchTarget = { wx: clampedX, wy: clampedY, line, length };
+        this.state.bowlPitchTarget = { wx: clampedX, wy: clampedZ, wz: clampedZ, line, length };
+        this.syncVisualMarkers();
+        this.syncHudDom();
         cricketAudio.playUiTick();
         if (this.callbacks.onSelectBowlSpot) this.callbacks.onSelectBowlSpot({ line, length });
       }
@@ -297,294 +567,345 @@ export class CricketArcadeRenderer {
     this.canvas.addEventListener('pointerdown', this._onDown);
   }
 
-  destroy() {
-    if (this.rafId) cancelAnimationFrame(this.rafId);
-    this.canvas.removeEventListener('pointerdown', this._onDown);
-  }
-
-  deliveryToWorldPoint(deliv) {
-    const sign = this.state.isLeftHand ? 1 : -1;
-    let wx = 0;
-    if (deliv?.line === 'Off Side') wx = 13 * sign;
-    else if (deliv?.line === 'Leg Side') wx = -13 * sign;
-    else if (deliv?.line === 'Wide') wx = 29 * sign;
-
-    let wy = 0;
-    if (deliv?.length === 'Yorker') wy = STRIKER_Y - 6;
-    else if (deliv?.length === 'Full' || deliv?.length === 'Full Toss') wy = BOWLER_Y + (STRIKER_Y - BOWLER_Y) * 0.74;
-    else if (deliv?.length === 'Short') wy = BOWLER_Y + (STRIKER_Y - BOWLER_Y) * 0.28;
-    return { wx, wy };
-  }
-
-  // Exact ray distance from striker crease (0, STRIKER_Y) to circular Boundary Rope R_BOUNDARY
-  distanceToBoundaryFromStriker(dirX, dirY) {
-    const b = 2 * STRIKER_Y * dirY;
-    const c = STRIKER_Y * STRIKER_Y - R_BOUNDARY * R_BOUNDARY;
-    const disc = Math.max(0, b * b - 4 * c);
-    return (-b + Math.sqrt(disc)) / 2;
-  }
-
-  spawnDust(wx, wy, count = 12, color = '#d6b47e') {
+  spawnParticles({ x, y, z, count = 14, colors = [0xd9be8b], speed = 5.5, gravity = 14, firework = false }) {
+    if (!this.particleGroup) return;
     for (let i = 0; i < count; i++) {
+      const col = colors[i % colors.length];
+      const mat = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(this.particleGeo, mat);
+      mesh.position.set(x, y, z);
       const a = Math.random() * Math.PI * 2;
-      const sp = 0.8 + Math.random() * 2.2;
+      const spd = (0.35 + Math.random() * 0.85) * speed;
+      const vy = firework ? (6 + Math.random() * 11) : (2.5 + Math.random() * 4.5);
+      mesh.scale.setScalar(firework ? 1.55 : 0.9);
+      this.particleGroup.add(mesh);
       this.particles.push({
-        wx, wy, wz: 2 + Math.random() * 6,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp,
-        vz: 1.1 + Math.random() * 1.8,
-        r: 2.2 + Math.random() * 3.0,
+        mesh,
+        mat,
+        vx: Math.cos(a) * spd,
+        vy,
+        vz: Math.sin(a) * spd,
+        gravity,
+        spinX: (Math.random() - 0.5) * 14,
+        spinY: (Math.random() - 0.5) * 14,
         life: 0,
-        maxLife: 24 + Math.random() * 14,
-        color
+        maxLife: firework ? (1.2 + Math.random() * 0.7) : (0.45 + Math.random() * 0.25)
       });
     }
   }
 
-  spawnFloatingText(text, scX, scY, color = '#fbbf24', scale = 1.2) {
-    this.floatingTexts.push({ text, x: scX, y: scY, color, scale, life: 0, maxLife: 95 });
+  resetStrikerStumps() {
+    this.stumpsDislodged = false;
+    this.stumpPhysics = [];
+    this.bailPhysics = [];
+    if (!this.stadium?.strikerWickets) return;
+    const xs = [-0.18, 0, 0.18];
+    this.stadium.strikerWickets.stumps.forEach((s, i) => {
+      s.position.set(xs[i], 0, 0);
+      s.rotation.set(0, 0, 0);
+    });
+    const bxs = [-0.09, 0.09];
+    this.stadium.strikerWickets.bails.forEach((b, i) => {
+      b.position.set(bxs[i], WORLD.STUMP_H + 0.02, 0);
+      b.rotation.set(0, 0, 0);
+    });
   }
 
   dislodgeStumps() {
-    this.stumpsBroken = true;
-    this.bails = [
-      { wx: -5, wy: STRIKER_Y, wz: 22, vx: -2.2 - Math.random(), vy: 1.5 - Math.random() * 3, vz: 5.5 + Math.random() * 2, rot: 0, vr: -0.25 },
-      { wx: 5, wy: STRIKER_Y, wz: 22, vx: 2.1 + Math.random(), vy: 1.5 - Math.random() * 3, vz: 6.2 + Math.random() * 2, rot: 0, vr: 0.28 }
-    ];
-    this.spawnDust(0, STRIKER_Y, 18, '#fbbf24');
+    if (!this.stadium?.strikerWickets) return;
+    this.stumpsDislodged = true;
+    const { stumps, bails } = this.stadium.strikerWickets;
+    this.stumpPhysics = stumps.map((mesh, idx) => ({
+      mesh,
+      vx: (idx - 1) * (2.6 + Math.random() * 2.0),
+      vy: 3.4 + Math.random() * 2.5,
+      vz: 4.5 + Math.random() * 3.8,
+      rx: 6 + Math.random() * 7,
+      rz: (idx - 1) * (5 + Math.random() * 5)
+    }));
+    this.bailPhysics = bails.map((mesh, idx) => ({
+      mesh,
+      vx: (idx === 0 ? -1 : 1) * (3.2 + Math.random() * 2.4),
+      vy: 6.2 + Math.random() * 3.0,
+      vz: 5.5 + Math.random() * 3.2,
+      rx: 12 + Math.random() * 8,
+      rz: 10 + Math.random() * 8
+    }));
+    this.spawnParticles({ x: 0, y: 0.6, z: WORLD.STRIKER_Z, count: 20, colors: [0xfbbf24, 0xf43f5e, 0xf8fafc], speed: 6 });
     cricketAudio.playStumpsRattle();
   }
 
   playBallAnimation(ballResult, options = {}) {
+    if (this.webglFailed) {
+      const lb = ballResult || {};
+      this.showCallout(lb.wicket ? 'OUT!' : lb.runs === 6 ? 'SIX!' : lb.runs === 4 ? 'FOUR!' : `${lb.runs || 0} RUNS`);
+      return;
+    }
+
     const lb = ballResult || {};
     const deliv = lb.delivery || { line: 'Stumps', length: 'Good Length', speed: 'Fast' };
     const bouncePt = this.deliveryToWorldPoint(deliv);
     const zone = options.zone || lb.zone || this.state.selectedZone || 'Cover';
     const shotAng = getZoneWorldAngle(zone, this.state.isLeftHand);
     const dirX = Math.cos(shotAng);
-    const dirY = Math.sin(shotAng);
-    const distRope = this.distanceToBoundaryFromStriker(dirX, dirY);
+    const dirZ = Math.sin(shotAng);
+    const distRope = this.distanceToBoundaryFromStriker(dirX, dirZ);
     const isLeave = String(lb.shotName || '').toLowerCase().includes('leave');
     const lowerComm = String(lb.commentary || '').toLowerCase();
     const isBowledOrLbw = lb.wicket && (lowerComm.includes('bowled') || lowerComm.includes('lbw') || lowerComm.includes('stumps') || lowerComm.includes('timber'));
 
-    this.stumpsBroken = false;
-    this.bails = [];
-    this.trail = [];
+    this.resetStrikerStumps();
+    this.trailPoints = [];
+    this.trailGeo.setDrawRange(0, 0);
     this.syncFielders();
+    this.fielders.forEach(f => { f.diveT = 0; });
 
     const speedMul = deliv.speed === 'Fast' ? 1.15 : deliv.speed === 'Slow' ? 0.85 : 1.0;
 
-    // Determine exact 3D landing target in world coordinates
     let landDist = 0;
-    let peakZ = 22;
-    let endZ = 3;
+    let peakY = 1.6;
+    let endY = 0.18;
     if (lb.rebowl || isLeave || isBowledOrLbw) {
       landDist = 0;
-      peakZ = 14;
+      peakY = 1.2;
     } else if (lb.runs === 6) {
-      // Strictly OVER the boundary rope into the 3D Stadium Crowd Stands!
-      landDist = distRope + 125;
-      peakZ = 225;
-      endZ = 42;
+      // Sails cleanly over the boundary hoardings into the 3D stands!
+      landDist = distRope + 14;
+      peakY = 17.5;
+      endY = 4.5;
     } else if (lb.runs === 4) {
-      // Races across the turf just past the boundary rope!
-      landDist = distRope + 18;
-      peakZ = 38;
-      endZ = 3;
+      landDist = distRope + 1.8;
+      peakY = 3.2;
+      endY = 0.2;
     } else if (lb.runs === 3) {
       landDist = distRope * 0.86;
-      peakZ = 56;
+      peakY = 4.6;
     } else if (lb.runs === 2) {
-      landDist = distRope * 0.66;
-      peakZ = 48;
+      landDist = distRope * 0.65;
+      peakY = 3.9;
     } else if (lb.runs === 1) {
       landDist = distRope * 0.44;
-      peakZ = 28;
+      peakY = 2.4;
     } else if (lb.wicket) {
-      landDist = distRope * 0.48;
-      peakZ = lowerComm.includes('caught') ? 105 : 22;
+      landDist = distRope * 0.46;
+      peakY = lowerComm.includes('caught') ? 9.5 : 2.2;
     } else {
-      landDist = Math.min(distRope * 0.20, 85);
-      peakZ = 16;
+      landDist = Math.min(distRope * 0.20, 9.0);
+      peakY = 1.3;
     }
 
-    const endWx = dirX * landDist;
-    const endWy = STRIKER_Y + dirY * landDist;
+    const endX = dirX * landDist;
+    const endZ = WORLD.STRIKER_Z + dirZ * landDist;
 
     this.anim = {
       t: 0,
       stage: 'runup',
-      runupDur: 0.46 / speedMul,
+      runupDur: 0.48 / speedMul,
       delivDur: 0.54 / speedMul,
-      outDur: (lb.runs >= 4 || lb.wicket || lb.runs >= 1) ? 1.42 : 0.70,
+      outDur: (lb.runs >= 4 || lb.wicket || lb.runs >= 1) ? 1.50 : 0.72,
       bouncePt,
       zone,
-      endWx,
-      endWy,
-      peakZ,
+      endX,
       endZ,
+      peakY,
+      endY,
       isLeave,
       isBowledOrLbw,
       bouncedPlayed: false,
       outcomeTriggered: false,
       lb,
-      ball: { wx: 0, wy: BOWLER_Y - 72, wz: 28 },
+      ball: new THREE.Vector3(-0.35, 1.8, WORLD.BOWLER_Z - 7.5),
       runCrossings: lb.wicket ? 0 : (lb.runs === 4 || lb.runs === 6 ? 0 : Math.min(3, lb.runs || 0))
     };
 
+    this.ballGroup.visible = false;
+    this.ballShadow.visible = false;
+    this.syncVisualMarkers();
     cricketAudio.playDeliveryWhoosh();
   }
 
   startLoop() {
-    this.lastTime = performance.now();
+    let last = performance.now();
     const tick = (now) => {
+      if (this.destroyed) return;
       this.rafId = requestAnimationFrame(tick);
-      const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
-      this.lastTime = now;
-      this.update(dt, now * 0.001);
-      this.draw(now * 0.001);
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+      last = now;
+      if (!this.webglFailed) {
+        this.update(dt, now * 0.001);
+        this.renderer.render(this.scene, this.camera);
+      }
     };
     this.rafId = requestAnimationFrame(tick);
   }
 
-  update(dt) {
-    if (this.cameraShake > 0) this.cameraShake = Math.max(0, this.cameraShake - dt * 26);
-    if (this.flashAlpha > 0) this.flashAlpha = Math.max(0, this.flashAlpha - dt * 1.9);
-    if (this.crowdExcitement > 0) this.crowdExcitement = Math.max(0, this.crowdExcitement - dt * 0.4);
+  pushTrailPoint(pos, colorHex) {
+    this.trailMat.color.setHex(colorHex);
+    this.trailPoints.push(pos.clone());
+    if (this.trailPoints.length > this.maxTrail) this.trailPoints.shift();
+    const arr = this.trailGeo.attributes.position.array;
+    for (let i = 0; i < this.trailPoints.length; i++) {
+      arr[i * 3] = this.trailPoints[i].x;
+      arr[i * 3 + 1] = this.trailPoints[i].y;
+      arr[i * 3 + 2] = this.trailPoints[i].z;
+    }
+    this.trailGeo.attributes.position.needsUpdate = true;
+    this.trailGeo.setDrawRange(0, this.trailPoints.length);
+  }
 
-    // Smoothly jog fielders back to base fielding spots when ball isn't active
-    if (!this.anim) {
-      this.camFocus.x += (0 - this.camFocus.x) * Math.min(1, dt * 4);
-      this.camFocus.y += (0 - this.camFocus.y) * Math.min(1, dt * 4);
-      const JOG_SPEED = 165;
-      for (const f of this.fielders) {
-        const dx = f.baseX - f.wx;
-        const dy = f.baseY - f.wy;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 0.5) {
-          const step = Math.min(dist, JOG_SPEED * dt);
-          f.wx += (dx / dist) * step;
-          f.wy += (dy / dist) * step;
-        }
-      }
+  update(dt, timeSec) {
+    if (this.cameraShake > 0) this.cameraShake = Math.max(0, this.cameraShake - dt * 2.8);
+    if (this.crowdExcitement > 0) this.crowdExcitement = Math.max(0, this.crowdExcitement - dt * 0.35);
+
+    this.stadium.updateCrowd(timeSec, this.crowdExcitement);
+
+    // Update Bounce Marker pulse
+    if (this.bounceRing.visible) {
+      const s = 1 + Math.sin(timeSec * 6) * 0.14;
+      this.bounceRing.scale.set(s, 1, s);
     }
 
+    // Update Particles (clay dust + 6s firework confetti)
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.wx += p.vx;
-      p.wy += p.vy;
-      p.wz = Math.max(0, p.wz + p.vz);
-      p.vz -= 0.14;
-      p.life++;
-      if (p.life >= p.maxLife) this.particles.splice(i, 1);
-    }
-
-    for (const b of this.bails) {
-      b.wx += b.vx;
-      b.wy += b.vy;
-      b.wz += b.vz;
-      b.vz -= 0.34;
-      b.rot += b.vr;
-      if (b.wz <= 1) {
-        b.wz = 1;
-        b.vz *= -0.35;
-        b.vx *= 0.65;
-        b.vy *= 0.65;
+      p.life += dt;
+      if (p.life >= p.maxLife) {
+        this.particleGroup.remove(p.mesh);
+        p.mat.dispose();
+        this.particles.splice(i, 1);
+        continue;
       }
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y = Math.max(0.05, p.mesh.position.y + p.vy * dt);
+      p.mesh.position.z += p.vz * dt;
+      p.vy -= p.gravity * dt;
+      p.mesh.rotation.x += p.spinX * dt;
+      p.mesh.rotation.y += p.spinY * dt;
     }
 
-    for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
-      const ft = this.floatingTexts[i];
-      ft.life++;
-      ft.y -= 28 * dt;
-      if (ft.life >= ft.maxLife) this.floatingTexts.splice(i, 1);
+    // Update Stump & Bail Rigid-Body Physics when bowled/broken
+    if (this.stumpsDislodged) {
+      [...this.stumpPhysics, ...this.bailPhysics].forEach((b) => {
+        b.mesh.position.x += b.vx * dt;
+        b.mesh.position.y += b.vy * dt;
+        b.mesh.position.z += b.vz * dt;
+        b.vy -= 18 * dt;
+        b.mesh.rotation.x += b.rx * dt;
+        b.mesh.rotation.z += b.rz * dt;
+        if (b.mesh.position.y < 0.08) {
+          b.mesh.position.y = 0.08;
+          b.vy *= -0.35;
+          b.vx *= 0.62;
+          b.vz *= 0.62;
+          b.rx *= 0.5;
+          b.rz *= 0.5;
+        }
+      });
     }
 
-    if (!this.anim) return;
+    // Position Striker according to Left/Right hand stance
+    const stanceSign = this.state.isLeftHand ? 1 : -1;
+    let guardX = 1.05 * stanceSign;
+    if (this.state.selectedStance === 'Off Side') guardX -= 0.28 * stanceSign;
+    if (this.state.selectedStance === 'Leg Side') guardX += 0.28 * stanceSign;
+
+    // Hit-stop freeze impact on crisp boundaries / timber strikes!
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= dt;
+      this.updateCamera(dt, timeSec, null);
+      return;
+    }
+
+    if (!this.anim) {
+      // Smoothly jog fielders back to base spots & play idle animations
+      this.batterRig.root.position.set(guardX, 0, WORLD.STRIKER_Z - 0.8);
+      animateBatterRig(this.batterRig, {
+        isLeftHand: this.state.isLeftHand,
+        stage: 'idle',
+        timeSec
+      });
+      this.nonStrikerRig.root.position.set(1.2, 0, WORLD.BOWLER_Z + 1.4);
+      animateBatterRig(this.nonStrikerRig, { isLeftHand: false, stage: 'idle', timeSec: timeSec + 1.1 });
+
+      this.bowlerRig.root.position.set(-1.0, 0, WORLD.BOWLER_Z - 7.5);
+      animateBowlerRig(this.bowlerRig, { stage: 'idle', timeSec });
+
+      this.fielders.forEach((f, idx) => {
+        const dx = f.baseX - f.wx;
+        const dz = f.baseZ - f.wz;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.1) {
+          const step = Math.min(dist, 9.5 * dt);
+          f.wx += (dx / dist) * step;
+          f.wz += (dz / dist) * step;
+          f.rig.root.position.set(f.wx, 0, f.wz);
+          animateFielderRig(f.rig, { moving: true, moveAngle: Math.atan2(dx, dz), timeSec, seed: idx });
+        } else {
+          f.rig.root.lookAt(0, 0, WORLD.STRIKER_Z);
+          animateFielderRig(f.rig, { moving: false, timeSec, seed: idx });
+        }
+      });
+
+      this.updateCamera(dt, timeSec, null);
+      return;
+    }
+
     const a = this.anim;
     a.t += dt;
 
     if (a.stage === 'runup') {
       const p = Math.min(1, a.t / a.runupDur);
-      a.ball.wx = 0;
-      a.ball.wy = (BOWLER_Y - 78) + p * 78;
-      a.ball.wz = 24 + Math.sin(p * Math.PI) * 14;
+      const bowlZ = (WORLD.BOWLER_Z - 7.5) + p * 7.5;
+      this.bowlerRig.root.position.set(-0.9, 0, bowlZ);
+      animateBowlerRig(this.bowlerRig, { stage: 'runup', progress: p, timeSec });
+      animateBatterRig(this.batterRig, { isLeftHand: this.state.isLeftHand, stage: 'runup', progress: p, timeSec });
+
       if (p >= 1) {
         a.stage = 'delivery';
         a.t = 0;
-        this.trail = [];
+        this.trailPoints = [];
+        this.ballGroup.visible = true;
+        this.ballShadow.visible = true;
       }
+      this.updateCamera(dt, timeSec, new THREE.Vector3(0, 1.0, bowlZ * 0.4));
     } else if (a.stage === 'delivery') {
       const p = Math.min(1, a.t / a.delivDur);
+      animateBowlerRig(this.bowlerRig, { stage: 'delivery', progress: p, timeSec });
+      animateBatterRig(this.batterRig, {
+        isLeftHand: this.state.isLeftHand,
+        stage: 'delivery',
+        progress: p,
+        timeSec
+      });
+
       const bounceP = 0.62;
       if (p <= bounceP) {
         const sub = p / bounceP;
-        a.ball.wx = a.bouncePt.wx * sub;
-        a.ball.wy = BOWLER_Y + (a.bouncePt.wy - BOWLER_Y) * sub;
-        a.ball.wz = 30 * (1 - sub * sub);
+        a.ball.x = -0.35 * (1 - sub) + a.bouncePt.wx * sub;
+        a.ball.z = WORLD.BOWLER_Z + (a.bouncePt.wz - WORLD.BOWLER_Z) * sub;
+        a.ball.y = 2.0 * (1 - sub * sub) + 0.16;
       } else {
         if (!a.bouncedPlayed) {
           a.bouncedPlayed = true;
           cricketAudio.playPitchBounce();
-          this.spawnDust(a.bouncePt.wx, a.bouncePt.wy, 14, '#d9be8b');
+          this.spawnParticles({ x: a.bouncePt.wx, y: 0.12, z: a.bouncePt.wz, count: 12, colors: [0xd9be8b, 0xf8fafc], speed: 4.0 });
         }
         const sub = (p - bounceP) / (1 - bounceP);
-        a.ball.wx = a.bouncePt.wx * (1 - sub * 0.72);
-        a.ball.wy = a.bouncePt.wy + (STRIKER_Y - a.bouncePt.wy) * sub;
-        const apex = a.lb.delivery?.length === 'Short' ? 34 : 15;
-        a.ball.wz = Math.sin(sub * Math.PI * 0.75) * apex + 7;
+        a.ball.x = a.bouncePt.wx * (1 - sub * 0.72);
+        a.ball.z = a.bouncePt.wz + (WORLD.STRIKER_Z - a.bouncePt.wz) * sub;
+        const apex = a.lb.delivery?.length === 'Short' ? 2.1 : 1.05;
+        a.ball.y = Math.sin(sub * Math.PI * 0.78) * apex + 0.35;
       }
 
-      this.trail.push({ wx: a.ball.wx, wy: a.ball.wy, wz: a.ball.wz, color: '#38bdf8' });
-      if (this.trail.length > 20) this.trail.shift();
+      this.syncBallTransform(a.ball, 0x38bdf8, dt);
+      this.updateCamera(dt, timeSec, new THREE.Vector3(a.ball.x * 0.35, 1.1, a.ball.z * 0.35));
 
       if (p >= 1) {
         a.stage = 'outcome';
         a.t = 0;
         if (!a.outcomeTriggered) {
           a.outcomeTriggered = true;
-          const lb = a.lb;
-          const bannerPos = this.project(0, STRIKER_Y, 45);
-          if (lb.wicket) {
-            this.cameraShake = 10;
-            this.flashAlpha = 0.34;
-            this.flashColor = '#f43f5e';
-            this.crowdExcitement = 1;
-            const lowerComm = String(lb.commentary || '').toLowerCase();
-            if (a.isBowledOrLbw || lowerComm.includes('run out') || lowerComm.includes('stumped')) {
-              this.dislodgeStumps();
-            } else {
-              cricketAudio.playBatCrack(lb.timing || 'Slightly Late');
-            }
-            cricketAudio.playCrowdCheer(1.3);
-            this.spawnFloatingText(a.isBowledOrLbw ? 'BOWLED! 💥' : 'OUT! 💥', bannerPos.x, bannerPos.y - 25, '#fb7185', 1.45);
-          } else if (lb.rebowl) {
-            this.spawnFloatingText('WIDE (+1)', bannerPos.x, bannerPos.y - 20, '#fbbf24', 1.15);
-          } else if (a.isLeave) {
-            this.spawnFloatingText('WELL LEFT', bannerPos.x, bannerPos.y - 18, '#94a3b8', 1.0);
-          } else {
-            cricketAudio.playBatCrack(lb.timing || 'Perfect');
-            if (lb.runs === 6) {
-              this.cameraShake = 11;
-              this.flashAlpha = 0.28;
-              this.flashColor = '#f59e0b';
-              this.crowdExcitement = 1;
-              cricketAudio.playCrowdCheer(1.75);
-              this.spawnFloatingText('MAXIMUM SIX! 🔥', bannerPos.x, bannerPos.y - 30, '#fbbf24', 1.55);
-            } else if (lb.runs === 4) {
-              this.cameraShake = 6.5;
-              this.flashAlpha = 0.22;
-              this.flashColor = '#10b981';
-              this.crowdExcitement = 0.85;
-              cricketAudio.playCrowdCheer(1.3);
-              this.spawnFloatingText('FOUR! ⚡', bannerPos.x, bannerPos.y - 26, '#34d399', 1.4);
-            } else if (lb.runs > 0) {
-              this.spawnFloatingText(`${lb.runs} RUN${lb.runs > 1 ? 'S' : ''}!`, bannerPos.x, bannerPos.y - 20, '#38bdf8', 1.15);
-            } else {
-              this.spawnFloatingText(lb.timing === 'Perfect' ? 'SOLID! •' : 'DOT BALL', bannerPos.x, bannerPos.y - 16, '#cbd5e1', 0.95);
-            }
-          }
+          this.triggerShotImpactOutcome(a);
         }
       }
     } else if (a.stage === 'outcome') {
@@ -592,613 +913,204 @@ export class CricketArcadeRenderer {
       const easeOut = 1 - Math.pow(1 - p, 2.0);
       const lb = a.lb;
 
+      // Animate Batter Follow-through OR Running Between Wickets
+      let strikerZ = WORLD.STRIKER_Z - 0.8;
+      let nonZ = WORLD.BOWLER_Z + 1.4;
+      if (a.runCrossings > 0) {
+        const trip = (p * a.runCrossings) % 2;
+        const prog = trip <= 1 ? trip : 2 - trip;
+        strikerZ = (WORLD.STRIKER_Z - 0.8) - prog * (WORLD.STRIKER_Z - WORLD.BOWLER_Z - 2.2);
+        nonZ = (WORLD.BOWLER_Z + 1.4) + prog * (WORLD.STRIKER_Z - WORLD.BOWLER_Z - 2.2);
+      }
+      this.batterRig.root.position.set(guardX, 0, strikerZ);
+      this.nonStrikerRig.root.position.set(1.2, 0, nonZ);
+
+      animateBatterRig(this.batterRig, {
+        isLeftHand: this.state.isLeftHand,
+        intent: this.state.selectedIntent,
+        zone: a.zone,
+        isLeave: a.isLeave,
+        stage: 'outcome',
+        progress: p,
+        runCrossings: a.runCrossings,
+        timeSec
+      });
+      if (a.runCrossings > 0) {
+        animateBatterRig(this.nonStrikerRig, { stage: 'outcome', runCrossings: a.runCrossings, timeSec });
+      }
+
       if (!a.isLeave && !lb.rebowl && !a.isBowledOrLbw && (lb.runs > 0 || lb.wicket)) {
-        a.ball.wx = a.endWx * easeOut;
-        a.ball.wy = STRIKER_Y + (a.endWy - STRIKER_Y) * easeOut;
-        a.ball.wz = Math.sin(p * Math.PI) * a.peakZ + a.endZ * p;
+        a.ball.x = a.endX * easeOut;
+        a.ball.z = WORLD.STRIKER_Z + (a.endZ - WORLD.STRIKER_Z) * easeOut;
+        a.ball.y = Math.max(0.16, Math.sin(p * Math.PI) * a.peakY + a.endY * p);
 
-        // Subtle camera pan tracking big shots across 3D stadium!
-        this.camFocus.x += (Math.max(-220, Math.min(220, a.ball.wx * 0.24)) - this.camFocus.x) * Math.min(1, dt * 3.5);
-        this.camFocus.y += (Math.max(-140, Math.min(140, a.ball.wy * 0.22)) - this.camFocus.y) * Math.min(1, dt * 3.5);
+        const tColor = lb.runs === 6 ? 0xf59e0b : lb.runs === 4 ? 0x10b981 : 0xf8fafc;
+        this.syncBallTransform(a.ball, tColor, dt);
 
-        this.trail.push({
-          wx: a.ball.wx, wy: a.ball.wy, wz: a.ball.wz,
-          color: lb.runs === 6 ? '#f59e0b' : lb.runs === 4 ? '#34d399' : '#e2e8f0'
-        });
-        if (this.trail.length > 26) this.trail.shift();
-
-        // Realistic sprint toward ball intercept after shot leaves the bat (zero teleporting!)
-        if (a.t > 0.08) {
+        // Closest Fielder Chases & Dives for the Ball!
+        if (p > 0.08 && this.fielders.length > 0) {
           let nearest = null;
           let bestD = Infinity;
           for (const f of this.fielders) {
-            const d = Math.hypot(f.baseX - a.endWx, f.baseY - a.endWy);
+            const d = Math.hypot(f.baseX - a.endX, f.baseZ - a.endZ);
             if (d < bestD) { bestD = d; nearest = f; }
           }
           if (nearest) {
-            const mag = Math.hypot(a.endWx, a.endWy) || 1;
-            const capDist = Math.min(mag, R_BOUNDARY - 16);
-            const tx = (a.endWx / mag) * capDist;
-            const ty = (a.endWy / mag) * capDist;
+            const mag = Math.hypot(a.endX, a.endZ) || 1;
+            const cap = Math.min(mag, WORLD.R_BOUNDARY - 1.2);
+            const tx = (a.endX / mag) * cap;
+            const tz = (a.endZ / mag) * cap;
             const dx = tx - nearest.wx;
-            const dy = ty - nearest.wy;
-            const dist = Math.hypot(dx, dy);
-            const SPRINT_SPEED = 195;
-            if (dist > 1) {
-              const step = Math.min(dist, SPRINT_SPEED * dt);
+            const dz = tz - nearest.wz;
+            const dist = Math.hypot(dx, dz);
+            const ang = Math.atan2(dx, dz);
+            if (dist > 0.25) {
+              const step = Math.min(dist, 14.5 * dt);
               nearest.wx += (dx / dist) * step;
-              nearest.wy += (dy / dist) * step;
+              nearest.wz += (dz / dist) * step;
+              nearest.rig.root.position.set(nearest.wx, 0, nearest.wz);
+              const isDiving = dist < 3.4 && (lb.runs === 4 || lb.wicket) && p > 0.52;
+              if (isDiving) nearest.diveT = Math.min(1, nearest.diveT + dt * 2.4);
+              animateFielderRig(nearest.rig, {
+                moving: !isDiving,
+                diveProgress: nearest.diveT,
+                moveAngle: ang,
+                timeSec,
+                seed: 3
+              });
             }
           }
         }
+
+        this.updateCamera(dt, timeSec, a.ball);
       } else {
-        a.ball.wx = 0;
-        a.ball.wy = STRIKER_Y + Math.min(46, p * 56);
-        a.ball.wz = 10 * (1 - p);
+        a.ball.set(0, 0.22, WORLD.STRIKER_Z + Math.min(3.2, p * 4.0));
+        this.syncBallTransform(a.ball, 0x94a3b8, dt);
+        this.updateCamera(dt, timeSec, null);
       }
 
       if (p >= 1) {
         this.anim = null;
+        this.ballGroup.visible = false;
+        this.ballShadow.visible = false;
+        this.syncVisualMarkers();
       }
     }
   }
 
-  drawPolygonGround(angles, r, z, fillStyle, strokeStyle = null, lw = 1) {
-    const ctx = this.ctx;
-    ctx.beginPath();
-    angles.forEach((a, i) => {
-      const p = this.project(Math.cos(a) * r, Math.sin(a) * r, z);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.closePath();
-    if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
-    if (strokeStyle) { ctx.strokeStyle = strokeStyle; ctx.lineWidth = lw; ctx.stroke(); }
+  syncBallTransform(pos, trailHex, dt) {
+    this.ballGroup.position.copy(pos);
+    this.ballMesh.rotation.x -= dt * 22;
+    this.ballMesh.rotation.z += dt * 8;
+
+    this.ballShadow.position.set(pos.x, 0.04, pos.z);
+    const sc = Math.max(0.35, 1.0 - pos.y * 0.04);
+    this.ballShadow.scale.set(sc, sc, 1);
+    this.ballShadow.material.opacity = Math.max(0.16, 0.48 - pos.y * 0.025);
+
+    this.pushTrailPoint(pos, trailHex);
   }
 
-  draw(timeSec) {
-    const ctx = this.ctx;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const targetW = Math.round(this.W * dpr);
-    const targetH = Math.round(this.H * dpr);
-    if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
-      this.canvas.width = targetW;
-      this.canvas.height = targetH;
-    }
+  triggerShotImpactOutcome(a) {
+    const lb = a.lb;
+    const lowerComm = String(lb.commentary || '').toLowerCase();
 
-    this._frameBasis = this.computeCameraBasis();
-
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    if (this.cameraShake > 0.2) {
-      ctx.translate((Math.random() - 0.5) * this.cameraShake * 2, (Math.random() - 0.5) * this.cameraShake * 2);
-    }
-
-    // 1. Night Sky & Stadium Horizon Gradient
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, this.H);
-    skyGrad.addColorStop(0, '#020617');
-    skyGrad.addColorStop(0.45, '#0b152c');
-    skyGrad.addColorStop(1, '#040812');
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, this.W, this.H);
-
-    // Subtle 3D polygon angles (56 segments for smooth perspective rings)
-    const SEGS = 56;
-    const angles = Array.from({ length: SEGS }, (_, i) => (i / SEGS) * Math.PI * 2);
-
-    // 2. Back Stadium 3D Bowl Wall + Tiered Stands (drawn on Northern hemisphere + full oval outer shell)
-    this.drawPolygonGround(angles, R_BOUNDARY + 175, 115, '#0f172a', 'rgba(56, 189, 248, 0.2)', 1.5);
-    this.drawPolygonGround(angles, R_BOUNDARY + 115, 58, '#1e293b', 'rgba(255,255,255,0.08)', 1);
-    this.drawPolygonGround(angles, R_BOUNDARY + 48, 10, '#0f172a', 'rgba(56, 189, 248, 0.25)', 2);
-
-    // Vertical 3D Floodlight Pylons on far stands
-    [[-520, -560], [520, -560]].forEach(([fx, fy]) => {
-      const baseP = this.project(fx, fy, 40);
-      const topP = this.project(fx, fy, 260);
-      ctx.strokeStyle = '#64748b';
-      ctx.lineWidth = 4 * topP.scale * 1.8;
-      ctx.beginPath();
-      ctx.moveTo(baseP.x, baseP.y);
-      ctx.lineTo(topP.x, topP.y);
-      ctx.stroke();
-
-      const fg = ctx.createRadialGradient(topP.x, topP.y, 4, topP.x, topP.y, 130);
-      fg.addColorStop(0, 'rgba(224, 242, 254, 0.6)');
-      fg.addColorStop(0.35, 'rgba(56, 189, 248, 0.14)');
-      fg.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = fg;
-      ctx.beginPath();
-      ctx.arc(topP.x, topP.y, 130, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(topP.x - 16, topP.y - 6, 32, 10);
-    });
-
-    // Animated 3D Crowd (drawn in back half before field, front half clipped cleanly)
-    const backSpecs = [];
-    const frontSpecs = [];
-    for (const spec of this.crowd) {
-      const jump = Math.sin(timeSec * (2.6 + this.crowdExcitement * 10) + spec.phase) * (2.5 + this.crowdExcitement * 7);
-      const wx = Math.cos(spec.ang) * spec.r;
-      const wy = Math.sin(spec.ang) * spec.r;
-      const p = this.project(wx, wy, spec.z + jump);
-      if (wy < 80) backSpecs.push({ p, color: spec.color });
-      else frontSpecs.push({ p, color: spec.color });
-    }
-    for (const s of backSpecs) {
-      ctx.fillStyle = s.color;
-      ctx.beginPath();
-      ctx.arc(s.p.x, s.p.y, Math.max(1.8, 4.2 * s.p.scale), 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 3. Textured Green 3D Outfield Concentric Mowing Rings
-    this.drawPolygonGround(angles, R_BOUNDARY + 22, 0, '#14532d');
-    [0.92, 0.78, 0.64, 0.50, 0.36, 0.22].forEach((mul, idx) => {
-      this.drawPolygonGround(angles, R_BOUNDARY * mul, 0, idx % 2 === 0 ? '#166534' : '#15803d');
-    });
-
-    // 30-Yard Powerplay Dashed Circle
-    ctx.save();
-    ctx.setLineDash([10, 7]);
-    this.drawPolygonGround(
-      angles,
-      R_RING,
-      0.5,
-      null,
-      this.state.isPowerplay ? 'rgba(245, 158, 11, 0.78)' : 'rgba(255, 255, 255, 0.45)',
-      2
-    );
-    ctx.restore();
-
-    // 3D Boundary Rope & LED Sponsor Cushions
-    this.drawPolygonGround(angles, R_BOUNDARY + 7, 2, null, '#0f172a', 7);
-    ctx.save();
-    ctx.setLineDash([18, 7]);
-    this.drawPolygonGround(angles, R_BOUNDARY, 3, null, '#f8fafc', 3);
-    ctx.restore();
-
-    // 4. 3D Perspective Trapezoid 22-Yard Pitch + Creases
-    const pCol = String(this.state.pitch || '').includes('Green') ? '#9fb37d'
-      : String(this.state.pitch || '').includes('Dusty') ? '#cfa972' : '#d6bb89';
-    const corners = [
-      this.project(-PITCH_HALF_W, -PITCH_HALF_LEN - 10, 0),
-      this.project(PITCH_HALF_W, -PITCH_HALF_LEN - 10, 0),
-      this.project(PITCH_HALF_W, PITCH_HALF_LEN + 12, 0),
-      this.project(-PITCH_HALF_W, PITCH_HALF_LEN + 12, 0)
-    ];
-    ctx.fillStyle = pCol;
-    ctx.strokeStyle = '#92784a';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    corners.forEach((c, i) => i === 0 ? ctx.moveTo(c.x, c.y) : ctx.lineTo(c.x, c.y));
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Crease white lines in 3D space
-    const drawLine3D = (x1, y1, x2, y2, col = '#fff', w = 1.8) => {
-      const a = this.project(x1, y1, 0.5);
-      const b = this.project(x2, y2, 0.5);
-      ctx.strokeStyle = col;
-      ctx.lineWidth = w;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    };
-    drawLine3D(-28, BOWLER_Y, 28, BOWLER_Y);
-    drawLine3D(-34, BOWLER_Y + 18, 34, BOWLER_Y + 18);
-    drawLine3D(-28, STRIKER_Y, 28, STRIKER_Y);
-    drawLine3D(-34, STRIKER_Y - 18, 34, STRIKER_Y - 18);
-    drawLine3D(-22, BOWLER_Y - 8, -22, BOWLER_Y + 22);
-    drawLine3D(22, BOWLER_Y - 8, 22, BOWLER_Y + 22);
-    drawLine3D(-22, STRIKER_Y - 22, -22, STRIKER_Y + 10);
-    drawLine3D(22, STRIKER_Y - 22, 22, STRIKER_Y + 10);
-
-    // 5. Interactive Aiming Wedge + Pitch Length/Bounce Hint (Batting) or Pitch Target Marker (Bowling)
-    if (!this.anim) {
-      if (this.state.phase === 'batting') {
-        const hint = this.state.currentBallHint;
-        if (hint?.length) {
-          const span = STRIKER_Y - BOWLER_Y;
-          const lenKey = String(hint.length).toLowerCase();
-          let t1 = 0.42, t2 = 0.64, lbl = 'GOOD LENGTH';
-          if (lenKey.includes('yorker')) { t1 = 0.85; t2 = 1.01; lbl = 'YORKER'; }
-          else if (lenKey.includes('full')) { t1 = 0.64; t2 = 0.85; lbl = lenKey.includes('toss') ? 'FULL TOSS' : 'FULL'; }
-          else if (lenKey.includes('short')) { t1 = 0.18; t2 = 0.42; lbl = 'SHORT'; }
-
-          const y1 = BOWLER_Y + span * t1;
-          const y2 = BOWLER_Y + span * t2;
-          const q = [
-            this.project(-PITCH_HALF_W, y1, 0.8),
-            this.project(PITCH_HALF_W, y1, 0.8),
-            this.project(PITCH_HALF_W, y2, 0.8),
-            this.project(-PITCH_HALF_W, y2, 0.8)
-          ];
-          ctx.fillStyle = hint.fullReveal ? 'rgba(56, 189, 248, 0.28)' : 'rgba(251, 191, 36, 0.30)';
-          ctx.strokeStyle = hint.fullReveal ? '#38bdf8' : '#fbbf24';
-          ctx.lineWidth = 1.8;
-          ctx.beginPath();
-          q.forEach((pt, idx) => idx === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          const midP = this.project(0, (y1 + y2) * 0.5, 2);
-          ctx.font = 'bold 10px JetBrains Mono, monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
-          ctx.fillRect(midP.x - 40, midP.y - 8, 80, 15);
-          ctx.fillStyle = hint.fullReveal ? '#7dd3fc' : '#fde68a';
-          ctx.fillText(lbl, midP.x, midP.y + 3);
-
-          if (hint.fullReveal && hint.line) {
-            const spot = this.deliveryToWorldPoint(hint);
-            const sp = this.project(spot.wx, spot.wy, 1.5);
-            const pulse = 6 + Math.sin(timeSec * 5) * 2;
-            ctx.strokeStyle = '#fb7185';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(sp.x, sp.y, pulse, pulse * 0.55, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fillStyle = '#f43f5e';
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, 3.6, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-
-        if (this.state.selectedZone) {
-          const ang = getZoneWorldAngle(this.state.selectedZone, this.state.isLeftHand);
-          const origP = this.project(0, STRIKER_Y, 6);
-          const dirX = Math.cos(ang), dirY = Math.sin(ang);
-          const dRope = this.distanceToBoundaryFromStriker(dirX, dirY);
-          const tipP = this.project(dirX * dRope * 0.72, STRIKER_Y + dirY * dRope * 0.72, 6);
-          const leftP = this.project(Math.cos(ang - 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang - 0.34) * dRope * 0.64, 4);
-          const rightP = this.project(Math.cos(ang + 0.34) * dRope * 0.64, STRIKER_Y + Math.sin(ang + 0.34) * dRope * 0.64, 4);
-
-          ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
-          ctx.beginPath();
-          ctx.moveTo(origP.x, origP.y);
-          ctx.lineTo(leftP.x, leftP.y);
-          ctx.lineTo(tipP.x, tipP.y);
-          ctx.lineTo(rightP.x, rightP.y);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.strokeStyle = '#fbbf24';
-          ctx.lineWidth = 2.4;
-          ctx.setLineDash([7, 5]);
-          ctx.beginPath();
-          ctx.moveTo(origP.x, origP.y);
-          ctx.lineTo(tipP.x, tipP.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+    if (lb.wicket) {
+      this.hitStopTimer = 0.065;
+      this.cameraShake = 0.42;
+      this.crowdExcitement = 1.0;
+      if (a.isBowledOrLbw || lowerComm.includes('run out') || lowerComm.includes('stumped')) {
+        this.dislodgeStumps();
       } else {
-        const pt = this.state.bowlPitchTarget;
-        const p = this.project(pt.wx, pt.wy, 1);
-        const pulse = 7 + Math.sin(timeSec * 5) * 2.5;
-        ctx.strokeStyle = '#fb7185';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.ellipse(p.x, p.y, pulse, pulse * 0.55, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.fillStyle = '#f43f5e';
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        cricketAudio.playBatCrack(lb.timing || 'Slightly Late');
+      }
+      cricketAudio.playCrowdCheer(1.3);
+      this.showCallout(a.isBowledOrLbw ? 'BOWLED! 💥' : 'OUT! 💥', '#fb7185', 'rgba(244,63,94,0.34)');
+    } else if (lb.rebowl) {
+      this.showCallout('WIDE (+1)', '#fbbf24');
+    } else if (a.isLeave) {
+      this.showCallout('WELL LEFT', '#cbd5e1');
+    } else {
+      cricketAudio.playBatCrack(lb.timing || 'Perfect');
+      this.spawnParticles({ x: 0, y: 0.9, z: WORLD.STRIKER_Z - 0.6, count: 10, colors: [0xfde047, 0x38bdf8], speed: 4.5 });
+
+      if (lb.runs === 6) {
+        this.hitStopTimer = 0.07;
+        this.cameraShake = 0.48;
+        this.crowdExcitement = 1.0;
+        cricketAudio.playCrowdCheer(1.8);
+        cricketAudio.playFireworkBurst();
+        this.showCallout('MAXIMUM SIX! 🔥', '#fbbf24', 'rgba(245,158,11,0.32)');
+        // Stadium fireworks & multi-colored confetti bursts!
+        const fireworkPalette = [0xfbbf24, 0x38bdf8, 0xf43f5e, 0x10b981, 0xa855f7, 0xffffff];
+        [[-22, 12, -32], [22, 14, -32], [a.endX * 0.55, 10, a.endZ * 0.55]].forEach(([fx, fy, fz]) => {
+          this.spawnParticles({ x: fx, y: fy, z: fz, count: 32, colors: fireworkPalette, speed: 9.5, gravity: 7.5, firework: true });
+        });
+      } else if (lb.runs === 4) {
+        this.hitStopTimer = 0.05;
+        this.cameraShake = 0.28;
+        this.crowdExcitement = 0.85;
+        cricketAudio.playCrowdCheer(1.35);
+        this.showCallout('FOUR! ⚡', '#34d399', 'rgba(16,185,129,0.24)');
+      } else if (lb.runs > 0) {
+        this.showCallout(`${lb.runs} RUN${lb.runs > 1 ? 'S' : ''}!`, '#38bdf8');
+      } else {
+        this.showCallout(lb.timing === 'Perfect' ? 'SOLID! •' : 'DOT BALL', '#e2e8f0');
       }
     }
+  }
 
-    // 6. Depth-Sorted 3D Entities (Stumps, Players, Fielders, Airborne Ball)
-    const drawList = [];
-    const fldKit = this.state.phase === 'batting' ? '#e11d48' : '#2563eb';
-    const batKit = this.state.phase === 'batting' ? '#2563eb' : '#e11d48';
+  updateCamera(dt, timeSec, followPos) {
+    let targetCamPos = new THREE.Vector3(0, 5.2, 22.8);
+    let targetLook = new THREE.Vector3(0, 0.85, -3.5);
 
-    drawList.push({
-      depth: this.project(0, BOWLER_Y, 0).depth,
-      render: () => this.drawStumps3D(0, BOWLER_Y, false)
-    });
-
-    // Striker & Non-Striker animations
-    let strikerWy = STRIKER_Y - 12;
-    let nonStrikerWy = BOWLER_Y + 14;
-    let runPhase = 0;
-    if (this.anim && this.anim.stage === 'outcome' && this.anim.runCrossings > 0) {
-      const p = Math.min(1, this.anim.t / this.anim.outDur);
-      const trip = (p * this.anim.runCrossings) % 2;
-      const prog = trip <= 1 ? trip : 2 - trip;
-      runPhase = timeSec * 16;
-      strikerWy = (STRIKER_Y - 12) - prog * (STRIKER_Y - BOWLER_Y - 26);
-      nonStrikerWy = (BOWLER_Y + 14) + prog * (STRIKER_Y - BOWLER_Y - 26);
+    if (followPos) {
+      targetCamPos.set(
+        Math.max(-14, Math.min(14, followPos.x * 0.32)),
+        5.2 + Math.max(0, followPos.y * 0.25),
+        22.8 + Math.max(-5, Math.min(5, followPos.z * 0.08))
+      );
+      targetLook.set(followPos.x * 0.58, Math.max(0.6, followPos.y * 0.45), followPos.z * 0.65);
     }
 
-    drawList.push({
-      depth: this.project(14, nonStrikerWy, 0).depth,
-      render: () => this.drawPlayer3D(14, nonStrikerWy, { kit: batKit, helmet: '#0f172a', role: 'nonstriker', swing: runPhase })
-    });
+    this.camPos.lerp(targetCamPos, Math.min(1, dt * 4.5));
+    this.camLook.lerp(targetLook, Math.min(1, dt * 5.2));
 
-    let bowlWy = BOWLER_Y - 72;
-    let bowlArm = 0;
-    let bowlStep = 0;
-    if (this.anim) {
-      if (this.anim.stage === 'runup') {
-        const p = Math.min(1, this.anim.t / this.anim.runupDur);
-        bowlWy = (BOWLER_Y - 72) + p * 72;
-        bowlStep = p * 18;
-        bowlArm = p * Math.PI * 1.6;
-      } else {
-        bowlWy = BOWLER_Y + 4;
-        bowlArm = Math.PI * 1.9;
-      }
-    }
-    drawList.push({
-      depth: this.project(-14, bowlWy, 0).depth,
-      render: () => this.drawPlayer3D(-14, bowlWy, { kit: fldKit, cap: fldKit, role: 'bowler', armAngle: bowlArm, swing: bowlStep })
-    });
+    const sx = this.cameraShake > 0 ? Math.sin(timeSec * 55) * this.cameraShake : 0;
+    const sy = this.cameraShake > 0 ? Math.cos(timeSec * 62) * this.cameraShake * 0.7 : 0;
 
-    for (const f of this.fielders) {
-      drawList.push({
-        depth: this.project(f.wx, f.wy, 0).depth,
-        render: () => this.drawPlayer3D(f.wx, f.wy, { kit: fldKit, cap: fldKit, role: 'fielder' })
+    this.camera.position.set(this.camPos.x + sx, this.camPos.y + sy, this.camPos.z);
+    this.camera.lookAt(this.camLook);
+  }
+
+  initFallback2D() {
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) return;
+    this.canvas.width = 960;
+    this.canvas.height = 560;
+    ctx.fillStyle = '#0b2f1d';
+    ctx.fillRect(0, 0, 960, 560);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('3D Stadium Active — Use 2D Radar & Controls Below', 480, 280);
+  }
+
+  destroy() {
+    this.destroyed = true;
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+    if (this._ro) this._ro.disconnect();
+    if (this._onDown && this.canvas) this.canvas.removeEventListener('pointerdown', this._onDown);
+    if (this.hudEl) this.hudEl.remove();
+    if (this.scene) {
+      this.scene.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
       });
     }
-
-    drawList.push({
-      depth: this.project(0, STRIKER_Y + 34, 0).depth,
-      render: () => this.drawPlayer3D(0, STRIKER_Y + 34, { kit: fldKit, helmet: fldKit, role: 'keeper' })
-    });
-
-    drawList.push({
-      depth: this.project(0, STRIKER_Y, 0).depth,
-      render: () => this.drawStumps3D(0, STRIKER_Y, this.stumpsBroken)
-    });
-
-    // Guard position in behind-WK camera (-wx = screen right / RHB off side, +wx = screen left / RHB leg side)
-    let guardX = this.state.isLeftHand ? -12 : 12;
-    if (this.state.selectedStance === 'Off Side') guardX += (this.state.isLeftHand ? 4 : -4);
-    if (this.state.selectedStance === 'Leg Side') guardX += (this.state.isLeftHand ? -4 : 4);
-
-    let batSwingAng = 0;
-    if (this.anim) {
-      if (this.anim.stage === 'delivery') batSwingAng = -0.75;
-      else if (this.anim.stage === 'outcome') batSwingAng = this.anim.isLeave ? -1.15 : 1.25;
-    }
-    drawList.push({
-      depth: this.project(guardX, strikerWy, 0).depth,
-      render: () => this.drawPlayer3D(guardX, strikerWy, {
-        kit: batKit, helmet: '#0f172a', role: 'batsman', isLeftHand: this.state.isLeftHand, batAngle: batSwingAng, swing: runPhase
-      })
-    });
-
-    // Sort farthest-to-closest!
-    drawList.sort((a, b) => b.depth - a.depth);
-    for (const item of drawList) item.render();
-
-    // 7. 3D Ball Trail & 3D Ball + Ground Shadow
-    if (this.trail.length > 1) {
-      for (let i = 1; i < this.trail.length; i++) {
-        const p1 = this.project(this.trail[i - 1].wx, this.trail[i - 1].wy, this.trail[i - 1].wz);
-        const p2 = this.project(this.trail[i].wx, this.trail[i].wy, this.trail[i].wz);
-        ctx.strokeStyle = this.trail[i].color;
-        ctx.globalAlpha = (i / this.trail.length) * 0.78;
-        ctx.lineWidth = Math.max(1.5, (i / this.trail.length) * 5.2 * p2.scale * 1.8);
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    if (this.anim) {
-      const b = this.anim.ball;
-      const gP = this.project(b.wx, b.wy, 0.5);
-      const bP = this.project(b.wx, b.wy, b.wz);
-      const shadowScale = Math.max(0.45, 1 - b.wz * 0.0025);
-
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-      ctx.beginPath();
-      ctx.ellipse(gP.x, gP.y, 7 * gP.scale * shadowScale * 1.6, 4 * gP.scale * shadowScale * 1.6, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      const r = Math.max(3.8, 9.5 * bP.scale);
-      const bg = ctx.createRadialGradient(bP.x - r * 0.3, bP.y - r * 0.3, r * 0.15, bP.x, bP.y, r);
-      bg.addColorStop(0, '#ffffff');
-      bg.addColorStop(0.65, '#e2e8f0');
-      bg.addColorStop(1, '#94a3b8');
-      ctx.fillStyle = bg;
-      ctx.beginPath();
-      ctx.arc(bP.x, bP.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // 8. 3D Pitch Dust Particles
-    for (const pt of this.particles) {
-      const pp = this.project(pt.wx, pt.wy, pt.wz);
-      ctx.fillStyle = pt.color;
-      ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife) * 0.78;
-      ctx.beginPath();
-      ctx.arc(pp.x, pp.y, Math.max(1.2, pt.r * pp.scale * 1.8), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-
-    // Front crowd specs in front of southern rope if visible
-    for (const s of frontSpecs) {
-      ctx.fillStyle = s.color;
-      ctx.beginPath();
-      ctx.arc(s.p.x, s.p.y, Math.max(1.8, 3.8 * s.p.scale), 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    if (this.flashAlpha > 0) {
-      ctx.fillStyle = this.flashColor;
-      ctx.globalAlpha = this.flashAlpha;
-      ctx.fillRect(0, 0, this.W, this.H);
-      ctx.globalAlpha = 1;
-    }
-
-    // 9. Celebratory Floating Arcade Typography
-    for (const ft of this.floatingTexts) {
-      const prog = ft.life / ft.maxLife;
-      const alpha = prog < 0.7 ? 1 : Math.max(0, 1 - (prog - 0.7) / 0.3);
-      const pop = prog < 0.14 ? 0.65 + (prog / 0.14) * 0.45 : 1.0;
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(ft.x, ft.y);
-      ctx.scale(ft.scale * pop, ft.scale * pop);
-      ctx.font = 'bold 28px "Chakra Petch", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.strokeStyle = '#020617';
-      ctx.lineWidth = 5;
-      ctx.strokeText(ft.text, 0, 0);
-      ctx.fillStyle = ft.color;
-      ctx.fillText(ft.text, 0, 0);
-      ctx.restore();
-    }
-
-    // Top-left Field Restriction & Aim HUD Chip inside Canvas
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.78)';
-    ctx.fillRect(14, 14, 345, 24);
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = 'bold 11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'left';
-    const fldRule = this.state.isPowerplay ? 'POWERPLAY (2 OUT / 7 IN)' : 'OPEN FIELD (5 OUT / 4 IN)';
-    const aimTxt = this.state.selectedZone ? ` • AIM: ${String(this.state.selectedZone).toUpperCase()}` : '';
-    const spotLen = String(this.state.bowlPitchTarget?.length || 'Good Length').toUpperCase();
-    const spotLine = String(this.state.bowlPitchTarget?.line || 'Stumps').toUpperCase();
-    ctx.fillText(
-      this.state.phase === 'batting'
-        ? `${fldRule}${aimTxt}`
-        : `${fldRule} • SPOT: ${spotLen} (${spotLine})`,
-      22,
-      30
-    );
-
-    ctx.restore();
-  }
-
-  drawStumps3D(wx, wy, broken) {
-    const ctx = this.ctx;
-    const base = this.project(wx, wy, 0);
-    const sc = base.scale * 1.85;
-    [-6, 0, 6].forEach((ox, idx) => {
-      const sp = this.project(wx + ox * 0.9, wy, 0);
-      const tp = this.project(wx + ox * 0.9 + (broken ? (idx - 1) * 7 : 0), wy + (broken ? 6 : 0), broken ? 14 : 21);
-      ctx.strokeStyle = '#d97706';
-      ctx.lineWidth = Math.max(2, 3.2 * sc);
-      ctx.beginPath();
-      ctx.moveTo(sp.x, sp.y);
-      ctx.lineTo(tp.x, tp.y);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#fde68a';
-      ctx.lineWidth = Math.max(1, 1.3 * sc);
-      ctx.beginPath();
-      ctx.moveTo(sp.x - 0.6, sp.y);
-      ctx.lineTo(tp.x - 0.6, tp.y);
-      ctx.stroke();
-    });
-
-    if (!broken) {
-      const l = this.project(wx - 6, wy, 22);
-      const r = this.project(wx + 6, wy, 22);
-      ctx.strokeStyle = '#f43f5e';
-      ctx.lineWidth = Math.max(1.8, 2.5 * sc);
-      ctx.beginPath();
-      ctx.moveTo(l.x, l.y);
-      ctx.lineTo(r.x, r.y);
-      ctx.stroke();
-    } else {
-      for (const b of this.bails) {
-        const bp = this.project(b.wx, b.wy, b.wz);
-        ctx.save();
-        ctx.translate(bp.x, bp.y);
-        ctx.rotate(b.rot);
-        ctx.fillStyle = '#fbbf24';
-        ctx.fillRect(-4 * sc, -1.5 * sc, 8 * sc, 3 * sc);
-        ctx.restore();
-      }
-    }
-  }
-
-  drawPlayer3D(wx, wy, opts = {}) {
-    const ctx = this.ctx;
-    const { kit = '#2563eb', cap = null, helmet = null, role = 'fielder', batAngle = 0, armAngle = 0, swing = 0, isLeftHand = false } = opts;
-    const base = this.project(wx, wy, 0);
-    const sc = base.scale * 1.85;
-
-    ctx.save();
-    ctx.translate(base.x, base.y);
-
-    // 3D Ground Drop Shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-    ctx.beginPath();
-    ctx.ellipse(0, 1, 9 * sc, 4.5 * sc, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Articulated Legs + Batting Pads highlight
-    const legOff = Math.sin(swing) * 4 * sc;
-    ctx.strokeStyle = role === 'batsman' || role === 'nonstriker' ? '#f8fafc' : '#0f172a';
-    ctx.lineWidth = Math.max(2, 3.2 * sc);
-    ctx.beginPath();
-    ctx.moveTo(-3 * sc, -9 * sc); ctx.lineTo(-3.5 * sc, 0 + legOff);
-    ctx.moveTo(3 * sc, -9 * sc); ctx.lineTo(3.5 * sc, 0 - legOff);
-    ctx.stroke();
-
-    // 3D Jersey Torso Cylinder
-    const grad = ctx.createLinearGradient(-7 * sc, -21 * sc, 7 * sc, -8 * sc);
-    grad.addColorStop(0, kit);
-    grad.addColorStop(1, '#0f172a');
-    ctx.fillStyle = grad;
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = 1;
-    ctx.fillRect(-6.5 * sc, -21 * sc, 13 * sc, 13 * sc);
-    ctx.strokeRect(-6.5 * sc, -21 * sc, 13 * sc, 13 * sc);
-
-    if (role === 'bowler') {
-      ctx.strokeStyle = '#fde68a';
-      ctx.lineWidth = Math.max(1.8, 2.8 * sc);
-      ctx.beginPath();
-      ctx.moveTo(6 * sc, -18 * sc);
-      ctx.lineTo(6 * sc + Math.cos(armAngle) * 12 * sc, -18 * sc - Math.sin(armAngle) * 12 * sc);
-      ctx.stroke();
-    }
-
-    if (role === 'batsman' || role === 'nonstriker') {
-      ctx.save();
-      const handSign = isLeftHand ? -1 : 1;
-      ctx.translate(handSign * 6 * sc, -14 * sc);
-      ctx.rotate(-handSign * (0.45 + batAngle));
-      ctx.fillStyle = '#eab308';
-      ctx.strokeStyle = '#78350f';
-      ctx.lineWidth = 1;
-      ctx.fillRect(-2 * sc, 0, 4 * sc, 16 * sc);
-      ctx.strokeRect(-2 * sc, 0, 4 * sc, 16 * sc);
-      ctx.restore();
-    }
-
-    // 3D Helmet / Cap Head Sphere
-    ctx.fillStyle = helmet || cap || '#f1f5f9';
-    ctx.beginPath();
-    ctx.arc(0, -25 * sc, 5.2 * sc, 0, Math.PI * 2);
-    ctx.fill();
-    if (helmet) {
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.arc(0, -23 * sc, 3.8 * sc, 0.2, Math.PI - 0.2);
-      ctx.stroke();
-    }
-
-    ctx.restore();
+    if (this.renderer) this.renderer.dispose();
   }
 }

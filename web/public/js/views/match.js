@@ -176,6 +176,17 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
     const handStr = isBat ? match.battingHand : match.oppBatterHand;
     const isLeftHand = String(handStr || '').toLowerCase().includes('left');
     const curHint = isBat && !match.finished ? getCurrentBallHint() : null;
+    const isAllR = Boolean(match.isAllRounder || match.role === 'All-Rounder');
+    const scoreStr = isBat
+      ? `${isAllR ? match.batting.runs + '/' + match.batting.wickets : (match.batting.teamRuns || match.batting.runs) + '/' + (match.batting.teamWickets || match.batting.wickets)}`
+      : `OPP ${match.bowling.runsConceded}/${match.bowling.wicketsTaken}`;
+    const oversStr = isBat
+      ? `${match.currentOverText || (Math.floor(match.batting.balls / 6) + '.' + (match.batting.balls % 6))} ov`
+      : `${Math.floor(match.bowling.ballsBowled / 6)}.${match.bowling.ballsBowled % 6} ov`;
+    const targetStr = isBat
+      ? `TARGET ${match.batting.targetRuns}`
+      : `DEFEND ${Math.max(0, (match.bowling.targetRuns || 1) - 1)}`;
+
     renderer.updateConfig({
       phase: match.phase,
       pitch: match.pitch,
@@ -187,7 +198,8 @@ export function renderMatchView(container, state, onMatchUpdate, navigate) {
       selectedIntent: selIntent || 'Stroke',
       selectedZone: (batStep === 'zone' && selZone) ? selZone : null,
       allowZoneClick: batStep === 'zone',
-      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null
+      currentBallHint: curHint ? { ...curHint, fullReveal: batStep === 'zone' } : null,
+      hud: { score: scoreStr, overs: oversStr, target: targetStr }
     });
   };
 
