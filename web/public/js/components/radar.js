@@ -19,7 +19,7 @@ export function renderFieldRadarSVG({
   const R = 176;
   const RING_R = 94;
 
-  const zones = isLeft ? [
+  const zones = !isLeft ? [
     { name: 'Fine Leg', short: 'Z1 Fine', start: 90, end: 135 },
     { name: 'Square Leg', short: 'Z2 Square', start: 135, end: 180 },
     { name: 'Mid Wicket', short: 'Z3 MidWkt', start: 180, end: 225 },
@@ -99,7 +99,7 @@ export function renderFieldRadarSVG({
   const maxOutfield = isPowerplay ? 2 : 5;
   let outfieldCount = 0;
   const restricted = rawFielders.map((f, idx) => {
-    const finalAngle = isLeft ? (540 - f.angle) % 360 : f.angle;
+    const finalAngle = !isLeft ? (540 - f.angle) % 360 : f.angle;
     if (f.dist > RING_R) {
       if (outfieldCount < maxOutfield) {
         outfieldCount++;

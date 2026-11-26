@@ -11,9 +11,9 @@ export const WAGON_ZONES = [
   'Long On'
 ];
 
-// World-space horizontal angle around Striker (+wy = toward keeper/south, -wy = toward bowler/north, +wx = off side for RHB)
+// World-space horizontal angle around Striker (+wy = toward keeper/south, -wy = toward bowler/north, -wx = screen-right/off-side for RHB)
 function getZoneWorldAngle(zone, isLeftHand) {
-  const rhb = {
+  const baseMap = {
     'Long Off':   -1.16,
     'Cover':      -0.44,
     'Point':       0.20,
@@ -23,8 +23,8 @@ function getZoneWorldAngle(zone, isLeftHand) {
     'Mid Wicket': -2.70,
     'Long On':    -1.98
   };
-  const base = rhb[zone] ?? -0.44;
-  return isLeftHand ? Math.PI - base : base;
+  const base = baseMap[zone] ?? -0.44;
+  return isLeftHand ? base : Math.PI - base;
 }
 
 export function angleToZone(rad, isLeftHand) {
@@ -229,7 +229,7 @@ export class CricketArcadeRenderer {
     let deepCount = 0;
 
     this.fielders = raw.map((slot, idx) => {
-      const ang = this.state.isLeftHand ? Math.PI - slot.ang : slot.ang;
+      const ang = this.state.isLeftHand ? slot.ang : Math.PI - slot.ang;
       let r = slot.rFrac * R_BOUNDARY;
       if (slot.deep) {
         deepCount++;
@@ -275,7 +275,7 @@ export class CricketArcadeRenderer {
         const clampedX = Math.max(-44, Math.min(44, ground.wx));
         const clampedY = Math.max(BOWLER_Y + 18, Math.min(STRIKER_Y - 2, ground.wy));
 
-        const orientedX = clampedX * (this.state.isLeftHand ? -1 : 1);
+        const orientedX = clampedX * (this.state.isLeftHand ? 1 : -1);
         let line = 'Stumps';
         if (orientedX > 24) line = 'Wide';
         else if (orientedX > 9) line = 'Off Side';
@@ -303,7 +303,7 @@ export class CricketArcadeRenderer {
   }
 
   deliveryToWorldPoint(deliv) {
-    const sign = this.state.isLeftHand ? -1 : 1;
+    const sign = this.state.isLeftHand ? 1 : -1;
     let wx = 0;
     if (deliv?.line === 'Off Side') wx = 13 * sign;
     else if (deliv?.line === 'Leg Side') wx = -13 * sign;
@@ -918,8 +918,8 @@ export class CricketArcadeRenderer {
     }
 
     drawList.push({
-      depth: this.project(this.state.isLeftHand ? -14 : 14, nonStrikerWy, 0).depth,
-      render: () => this.drawPlayer3D(this.state.isLeftHand ? -14 : 14, nonStrikerWy, { kit: batKit, helmet: '#0f172a', role: 'nonstriker', swing: runPhase })
+      depth: this.project(14, nonStrikerWy, 0).depth,
+      render: () => this.drawPlayer3D(14, nonStrikerWy, { kit: batKit, helmet: '#0f172a', role: 'nonstriker', swing: runPhase })
     });
 
     let bowlWy = BOWLER_Y - 72;
@@ -958,9 +958,10 @@ export class CricketArcadeRenderer {
       render: () => this.drawStumps3D(0, STRIKER_Y, this.stumpsBroken)
     });
 
-    let guardX = this.state.isLeftHand ? 12 : -12;
-    if (this.state.selectedStance === 'Off Side') guardX += (this.state.isLeftHand ? -4 : 4);
-    if (this.state.selectedStance === 'Leg Side') guardX += (this.state.isLeftHand ? 4 : -4);
+    // Guard position in behind-WK camera (-wx = screen right / RHB off side, +wx = screen left / RHB leg side)
+    let guardX = this.state.isLeftHand ? -12 : 12;
+    if (this.state.selectedStance === 'Off Side') guardX += (this.state.isLeftHand ? 4 : -4);
+    if (this.state.selectedStance === 'Leg Side') guardX += (this.state.isLeftHand ? -4 : 4);
 
     let batSwingAng = 0;
     if (this.anim) {
@@ -1176,7 +1177,7 @@ export class CricketArcadeRenderer {
       ctx.save();
       const handSign = isLeftHand ? -1 : 1;
       ctx.translate(handSign * 6 * sc, -14 * sc);
-      ctx.rotate(handSign * (0.45 + batAngle));
+      ctx.rotate(-handSign * (0.45 + batAngle));
       ctx.fillStyle = '#eab308';
       ctx.strokeStyle = '#78350f';
       ctx.lineWidth = 1;

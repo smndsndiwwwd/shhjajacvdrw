@@ -64,11 +64,11 @@ export function renderHawkEyePitchSVG({ delivery = null, lengthOnly = false, bat
   const line = delivery?.line || null;
   const len = delivery?.length || null;
 
-  // Map Line to X (pitch width 56..164)
+  // Map Line to X (behind-batter perspective: RHB Off Side is right 136, Leg Side is left 84)
   let bx = 110;
-  if (line === 'Off Side') bx = isLeft ? 136 : 84;
-  else if (line === 'Leg Side') bx = isLeft ? 84 : 136;
-  else if (line === 'Wide') bx = isLeft ? 156 : 64;
+  if (line === 'Off Side') bx = isLeft ? 84 : 136;
+  else if (line === 'Leg Side') bx = isLeft ? 136 : 84;
+  else if (line === 'Wide') bx = isLeft ? 64 : 156;
 
   // Map Length to Y (bowler top ~22 -> batter crease bottom ~158)
   const lenLower = String(len || '').toLowerCase();
